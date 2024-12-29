@@ -83,20 +83,21 @@ class IceSoc(cpuParam: ParamSimple, blackboxRam: Boolean, clkFreq: Int) extends 
 }
 
 object IceSocGen extends App{
-  val config = SpinalConfig(targetDirectory = "hw/rtl").addStandardMemBlackboxing(blackboxOnlyIfRequested)
-
   // Default Param for IceSoc
   val param = new ParamSimple()
 
   var blackboxRam = false
   var clkFreq = 100
-
+  var output_path = "hw/rtl"
+  
   assert(new scopt.OptionParser[Unit]("VexiiRiscv") {
     help("help").text("prints this usage text")
     opt[Int]("freq").action { (v, c) => clkFreq = v }.text("Set SoC Clk Frequency (default 100 MHz)")
     opt[Unit]("blackboxram").action{(v, c) => blackboxRam = true}.text("Blackbox the ram")
+    opt[String]("output").action{(v, c) => output_path = v}.text("Output path for generated RTL")
     param.addOptions(this)
   }.parse(args, Unit).nonEmpty)
+  var config = SpinalConfig(targetDirectory = output_path).addStandardMemBlackboxing(blackboxOnlyIfRequested)
   val report = SpinalVerilog(config){
     new IceSoc(param, blackboxRam, clkFreq)
   }
