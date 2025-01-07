@@ -19,6 +19,9 @@ import spinal.lib.misc.{Elf, PathTracer, TilelinkClintFiber}
 import spinal.lib.misc.plic.TilelinkPlicFiber
 import spinal.lib.system.tag.PMA
 import vexiiriscv.ParamSimple
+
+import vexiiriscv.fetch.FetchL1Plugin
+import vexiiriscv.execute.lsu.LsuL1Plugin
 import vexiiriscv.execute.SrcPlugin
 import vexiiriscv.misc.TrapPlugin
 import vexiiriscv.soc.TilelinkVexiiRiscvFiber
@@ -73,10 +76,29 @@ class IceSoc(cpuParam: ParamSimple, blackboxRam: Boolean, clkFreq: Int) extends 
       val cpuPlic = cpu.bind(plic)
       val cpuClint = cpu.bind(clint)
     }
-    println(blackboxRam)
+    // println(blackboxRam)
     if (blackboxRam) {
       val patches = Fiber build new Area{
         ram.thread.logic.mem.generateAsBlackBox()
+
+        if (plugins.exists(_.isInstanceOf[FetchL1Plugin])) {
+          // Fetch L1 PluginComponents
+          // println(cpu.logic.core.host[FetchL1Plugin].logic.banks)
+          for (bank <- cpu.logic.core.host[FetchL1Plugin].logic.banks) {
+            bank.mem.generateAsBlackBox()
+          }
+          // println(cpu.logic.core.host[FetchL1Plugin].logic.ways)
+        }
+
+        if (plugins.exists(_.isInstanceOf[LsuL1Plugin])) {
+          // Lsu L1 Plugin Components
+          // println(cpu.logic.core.host[LsuL1Plugin].logic.banks)
+          for (bank <- cpu.logic.core.host[LsuL1Plugin].logic.banks) {
+            bank.mem.generateAsBlackBox()
+          }
+          // println(cpu.logic.core.host[LsuL1Plugin].logic.ways)
+        }
+
       }
     }
   }
@@ -93,7 +115,7 @@ object IceSocGen extends App{
   assert(new scopt.OptionParser[Unit]("VexiiRiscv") {
     help("help").text("prints this usage text")
     opt[Int]("freq").action { (v, c) => clkFreq = v }.text("Set SoC Clk Frequency (default 100 MHz)")
-    opt[Unit]("blackboxram").action{(v, c) => blackboxRam = true}.text("Blackbox the ram")
+    opt[Unit]("blackboxram").action{(v, c) => blackboxRam = true}.text("Blackbox the RAM In SoC")
     opt[String]("output").action{(v, c) => output_path = v}.text("Output path for generated RTL")
     param.addOptions(this)
   }.parse(args, Unit).nonEmpty)
