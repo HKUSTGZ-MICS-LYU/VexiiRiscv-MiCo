@@ -126,6 +126,8 @@ class TestOptions{
   var seed = 2
   var jtagRemote = false
   var spawnProcess = Option.empty[String]
+  var simPath = "sim"
+  var genPath = "sim_gen"
 
 //  traceRvlsLog = true; traceKonata = true; traceWave = true; traceSpikeLog = true; printStats = true
 
@@ -173,6 +175,8 @@ class TestOptions{
     opt[Unit]("rand-seed") action { (v, c) => seed = scala.util.Random.nextInt() }
 
     opt[String]("spawn-process") unbounded() action { (v, c) => spawnProcess = Some(v) }
+    opt[String]("sim-path") unbounded() action { (v, c) => simPath = v }
+    opt[String]("gen-path") unbounded() action { (v, c) => genPath = v }
   }
 
   def test(compiled : SimCompiled[VexiiRiscv]): Unit = {
@@ -663,7 +667,7 @@ object TestBench extends App{
   def doIt(param : ParamSimple = new ParamSimple()) {
     val testOpt = new TestOptions()
 
-    val genConfig = SpinalConfig()
+    val genConfig = SpinalConfig(targetDirectory = testOpt.genPath)
 //    genConfig.includeSimulation
 
     val simConfig = SpinalSimConfig()
@@ -672,6 +676,7 @@ object TestBench extends App{
     simConfig.withFstWave
     simConfig.withTestFolder
     simConfig.withConfig(genConfig)
+    simConfig.workspacePath(testOpt.simPath)
 
     assert(new scopt.OptionParser[Unit]("VexiiRiscv") {
       help("help").text("prints this usage text")
