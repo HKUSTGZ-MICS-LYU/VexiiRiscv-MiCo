@@ -1,5 +1,6 @@
 sbt "runMain vexiiriscv.tester.TestBench \
     --with-rvc \
+    --with-rvf \
     --with-mul \
     --with-div \
     --with-late-alu \
