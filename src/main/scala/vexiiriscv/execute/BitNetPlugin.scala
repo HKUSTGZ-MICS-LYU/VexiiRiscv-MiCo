@@ -21,10 +21,8 @@ object BitNetPlugin{
       case "1.5b" => 2
       case "2b" => 2
     }
-    // We assume the little-endian format
     val a_vec = Range(4, 0, -1).map{i => a(i*8-1 downto i*8-8).asSInt}
-    // val w_vec = Range(4, 0, -1).map{i => w(i*w_width-1 downto (i-1)*w_width)} 
-    val w_vec = Range(1, 5, 1).map{i => w(i*w_width-1 downto (i-1)*w_width)} 
+    val w_vec = Range(4, 0, -1).map{i => w(i*w_width-1 downto (i-1)*w_width)} 
     val a_tmp = a_vec.zip(w_vec).map{
         case (a_i, w_i) => {
             val a_tmp_i = SInt(8 bits)
@@ -168,8 +166,6 @@ class BitNetBufferPlugin(val layer : LaneLayer,
 
       val addr_offset = offset<<log2Up(8*w_width)
       val data = (rs1 ## rs2).asBits
-
-      // We assume the little-endian format
 
       val buffer_high = buffer(addr_offset + 4*w_width, 4*w_width bits).asUInt
       val buffer_low = buffer(addr_offset, 4*w_width bits).asUInt
