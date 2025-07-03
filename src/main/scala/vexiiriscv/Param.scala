@@ -112,6 +112,7 @@ class ParamSimple() {
   var dispatcherAt = 1
   var regFileSync = true
   var regFileDualPortRam = true
+  var regFileRegBasedRam = false
   var withGShare = false
   var withBtb = false
   var withRas = false
@@ -182,6 +183,7 @@ class ParamSimple() {
   var bootMemClear = false
   var mulKeepSrc = false
   var withCfu = false
+  var gshareBytes = 4 KiB
 
   var fetchTsp = MmuStorageParameter(
     levels = List(
@@ -586,6 +588,7 @@ class ParamSimple() {
     opt[Unit]("regfile-sync") action { (v, c) => regFileSync = true }
     opt[Unit]("regfile-dual-ports") action { (v, c) => regFileDualPortRam = true }
     opt[Unit]("regfile-infer-ports") action { (v, c) => regFileDualPortRam = false }
+    opt[Unit]("regfile-reg-based") action { (v, c) => regFileRegBasedRam = true; regFileDualPortRam = false}
     opt[Int]("allow-bypass-from") action { (v, c) => allowBypassFrom = v }
     opt[Int]("performance-counters").unbounded() action { (v, c) => withPerformanceCounters = true; additionalPerformanceCounters = v }
     opt[Unit]("without-performance-scountovf").unbounded() action { (v, c) => withPerformanceScountovf = false }
@@ -630,6 +633,7 @@ class ParamSimple() {
     opt[Int] ("debug-triggers") action { (v, c) => privParam.debugTriggers = v }
     opt[Unit]("debug-triggers-lsu") action { (v, c) => privParam.debugTriggersLsu = true }
     opt[Unit]("debug-jtag-tap") action { (v, c) => embeddedJtagTap = true }
+    opt[Unit]("debug-jtag-instruction") action { (v, c) => embeddedJtagInstruction = true }
     opt[Unit]("with-boot-mem-init") action { (v, c) => bootMemClear = true }
     opt[Int]("physical-width") action { (v, c) => physicalWidth = v }
     opt[Unit]("mul-keep-src") action { (v, c) => mulKeepSrc = true }
@@ -639,6 +643,7 @@ class ParamSimple() {
     opt[Unit]("pmp-tor-disable") action { (v, c) => pmpParam.withTor = false }
     opt[Unit]("with-rdtime") action { (v, c) => privParam.withRdTime = true }
     opt[Unit]("with-cfu") action { (v, c) => withCfu = true }
+    opt[Int]("gshare-bytes") action{ (v,c) => gshareBytes = v }
     opt[Unit]("dual-issue") action { (v, c) =>
       decoders = 2
       lanes = 2
@@ -708,7 +713,7 @@ class ParamSimple() {
     }
     if(withGShare) {
       plugins += new prediction.GSharePlugin (
-        memBytes = 4 KiB,
+        memBytes = gshareBytes,
         historyWidth = 12,
         readAt = 0,
         bootMemClear = bootMemClear
@@ -804,6 +809,7 @@ class ParamSimple() {
       preferedWritePortForInit = "lane0",
       syncRead = regFileSync,
       dualPortRam = regFileDualPortRam,
+      regBasedRam = regFileRegBasedRam,
       maskReadDuringWrite = false
     )
 
@@ -979,6 +985,7 @@ class ParamSimple() {
       debugCd = embeddedJtagCd,
       noTapCd = embeddedJtagNoTapCd
     )
+
     val lateAluAt = intWritebackAt
 
     // Late ALU in the main execution pipeline
@@ -1034,6 +1041,7 @@ class ParamSimple() {
         preferedWritePortForInit = "lane0",
         syncRead = regFileSync,
         dualPortRam = regFileDualPortRam,
+        regBasedRam = regFileRegBasedRam,
         maskReadDuringWrite = false
       )
       plugins += new WriteBackPlugin(lane0, FloatRegFile, writeAt = 9, allowBypassFrom = allowBypassFrom.max(2)) //Max 2 to save area on not so important instructions
