@@ -123,22 +123,22 @@ class MiCoPlugin(val layer : LaneLayer)
         import SrcKeys._
 
         // 8-bit Engine Data Path
-        add(DOTP8x8).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q8, INC -> U(0))
-        add(DOTP8x4).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q4, INC -> U(xlen/2))
-        add(DOTP8x2).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q2, INC -> U(xlen/4))
-        add(DOTP8x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q1, INC -> U(xlen/8))
+        add(DOTP8x8).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q8, INC -> U(0, xlenLog2 bits))
+        add(DOTP8x4).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q4, INC -> U(xlen/2, xlenLog2 bits))
+        add(DOTP8x2).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q2, INC -> U(xlen/4, xlenLog2 bits))
+        add(DOTP8x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q1, INC -> U(xlen/8, xlenLog2 bits))
 
         // 4-bit Engine Data Path
-        add(DOTP4x4).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q4, WQ -> Q4, INC -> U(0))
-        add(DOTP4x2).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q4, WQ -> Q2, INC -> U(xlen/2))
-        add(DOTP4x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q4, WQ -> Q1, INC -> U(xlen/4))
+        add(DOTP4x4).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q4, WQ -> Q4, INC -> U(0, xlenLog2 bits))
+        add(DOTP4x2).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q4, WQ -> Q2, INC -> U(xlen/2, xlenLog2 bits))
+        add(DOTP4x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q4, WQ -> Q1, INC -> U(xlen/4, xlenLog2 bits))
 
         // 2-bit Engine Data Path
-        add(DOTP2x2).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q2, WQ -> Q2, INC -> U(0))
-        add(DOTP2x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q2, WQ -> Q1, INC -> U(xlen/2))
+        add(DOTP2x2).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q2, WQ -> Q2, INC -> U(0, xlenLog2 bits))
+        add(DOTP2x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q2, WQ -> Q1, INC -> U(xlen/2, xlenLog2 bits))
 
         // 1-bit Engine Data Path
-        add(DOTP1x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q1, WQ -> Q1, INC -> U(0))
+        add(DOTP1x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q1, WQ -> Q1, INC -> U(0, xlenLog2 bits))
 
         //Now that we are done specifying everything about the instructions, we can release the Logic.uopRetainer
         //This will allow a few other plugins to continue their elaboration (ex : decoder, dispatcher, ...)
