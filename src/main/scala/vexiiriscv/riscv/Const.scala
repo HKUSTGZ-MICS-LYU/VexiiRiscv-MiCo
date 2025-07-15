@@ -158,5 +158,7 @@ object CSR {
   val FFLAGS = 0x1
   val FRM = 0x2
   val FCSR = 0x3
+
+  val VPU_CONFIG = 0x801
 }
 

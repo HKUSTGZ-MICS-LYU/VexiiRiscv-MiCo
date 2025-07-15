@@ -5,7 +5,7 @@ import spinal.lib.misc.pipeline._
 import spinal.lib.misc.plugin.{FiberPlugin, PluginHost}
 import vexiiriscv.Global
 import vexiiriscv.decode.Decode
-import vexiiriscv.riscv.{Const, MicroOp, Riscv, Rvfd, Rvi}
+import vexiiriscv.riscv.{Const, MicroOp, Riscv, Rvfd, Rvi, VectorExt}
 import vexiiriscv.riscv.Riscv._
 import vexiiriscv.execute._
 
@@ -18,7 +18,9 @@ object AguPlugin extends AreaObject {
   val STORE = Payload(Bool())
   val ATOMIC = Payload(Bool()) // LR => ATOMIC && LOAD && !STORE, SC => ATOMIC && !LOAD && STORE, AMO => ATOMIC && LOAD && STORE
   val SIZE = Payload(UInt(2 bits)) // bytes = 1 << SIZE
+  val VecOffset = Payload(UInt(1 bits)) // high(127-64) or low(63-0) bits of a 128bits vector register
   val FLOAT = Payload(Bool())
+  val VECTOR = Payload(Bool())
   val CLEAN, INVALIDATE = Payload(Bool())
 }
 
@@ -38,7 +40,7 @@ class AguFrontend(
   import AguPlugin._
   val sk = SrcKeys
 
-  val defaultsDecodings = mutable.LinkedHashMap(LOAD -> False, STORE -> False, ATOMIC -> False, FLOAT -> False, CLEAN -> False, INVALIDATE -> False)
+  val defaultsDecodings = mutable.LinkedHashMap(LOAD -> False, STORE -> False, ATOMIC -> False, FLOAT -> False, VECTOR -> False, CLEAN -> False, INVALIDATE -> False)
   def dec(changed : (Payload[_ <: BaseType], Any)*) = {
     val ret =  mutable.LinkedHashMap[Payload[_ <: BaseType], Any]()
     ret ++= defaultsDecodings
@@ -55,7 +57,12 @@ class AguFrontend(
   if (RVF) writeRfFloat ++= List(Rvfd.FLW)
   if (RVD) writeRfFloat ++= List(Rvfd.FLD)
   writingRf ++= writeRfFloat
-  for (op <- writingRf) add(op).srcs(sk.Op.ADD, sk.SRC1.RF, sk.SRC2.I).decode(dec(LOAD -> True, FLOAT -> Bool(writeRfFloat.contains(op))))
+
+  val writeRfVector = ArrayBuffer[MicroOp]()
+  writeRfVector ++= List(VectorExt.VecLDLow)
+  writeRfVector ++= List(VectorExt.VecLDHigh)
+  writingRf ++= writeRfVector
+  for (op <- writingRf) add(op).srcs(sk.Op.ADD, sk.SRC1.RF, sk.SRC2.I).decode(dec(LOAD -> True, FLOAT -> Bool(writeRfFloat.contains(op)), VECTOR -> Bool(writeRfVector.contains(op))))
 
   // Store stuff
   val storeOps = List(sk.Op.ADD, sk.SRC1.RF, sk.SRC2.S)
@@ -64,6 +71,10 @@ class AguFrontend(
   for (store <- writingMem) add(store).srcs(storeOps).decode(dec(STORE -> True))
   if (RVF) writingMem += add(Rvfd.FSW).srcs(storeOps).decode(dec(STORE -> True, FLOAT -> True)).uop
   if (RVD) writingMem += add(Rvfd.FSD).srcs(storeOps).decode(dec(STORE -> True, FLOAT -> True)).uop
+
+  // Vector store
+  val writeMemVector = ArrayBuffer[MicroOp](VectorExt.VecSTLow, VectorExt.VecSTHigh)
+  for (store <- writeMemVector) writingMem += add(store).srcs(storeOps).decode(dec(STORE -> True, VECTOR -> True)).uop
 
   // Atomic stuff
   val amos = RVA.get generate new Area {

@@ -125,15 +125,18 @@ class LsuPlugin(var layer : LaneLayer,
     val pcs = host.get[PerformanceCounterService]
     val hp = host.get[PrefetcherPlugin]
     val fpwbp = host.findOption[WriteBackPlugin](p => p.lane == layer.lane && p.rf == FloatRegFile)
+    val vecwbp = host.findOption[WriteBackPlugin](p => p.lane == layer.lane && p.rf == VectorRegFile)  // Write back for vector extension
     val buildBefore = retains(elp.pipelineLock, ats.portsLock, ps.portsLock)
     val earlyLock = retains(List(ats.storageLock) ++ pcs.map(_.elaborationLock).toList)
-    val retainer = retains(List(elp.uopLock, srcp.elaborationLock, ifp.elaborationLock, ts.trapLock, ss.elaborationLock, cap.csrLock, ds.elaborationLock) ++ fpwbp.map(_.elaborationLock))
-    awaitBuild()
+    val retainer = retains(List(elp.uopLock, srcp.elaborationLock, ifp.elaborationLock, ts.trapLock, ss.elaborationLock)
+    ++ fpwbp.map(_.elaborationLock)
+    ++ vecwbp.map(_.elaborationLock))
     Riscv.RVA.set(withRva)
 
     // * Instanciate a few hardware interfaces *
     val translationStorage = ats.newStorage(translationStorageParameter, PerformanceCounterService.DCACHE_TLB_CYCLES)
     val fpwb = fpwbp.map(_.createPort(wbAt))
+    val vecwb = vecwbp.map(_.createPort(wbAt))
 
     val events = pcs.map(p => new Area {
       val waiting = p.createEventPort(PerformanceCounterService.DCACHE_WAITING)
@@ -176,6 +179,12 @@ class LsuPlugin(var layer : LaneLayer,
     fpwbp.foreach(_.addMicroOp(fpwb.get, layer, frontend.writeRfFloat))
     for(fp <- frontend.writeRfFloat) {
       val spec = layer(fp)
+      spec.setCompletion(wbAt)
+    }
+
+    vecwbp.foreach(_.addMicroOp(vecwb.get, layer, frontend.writeRfVector))
+    for(vec <- frontend.writeRfVector) {
+      val spec = layer(vec)
       spec.setCompletion(wbAt)
     }
 
@@ -967,6 +976,11 @@ class LsuPlugin(var layer : LaneLayer,
       iwb.valid := SEL && !FLOAT
       iwb.payload := onCtrl.loadData.RESULT.resized
 
+      val vecWriteBackBuffer = new Area {
+        val low = RegInit(B(0, 64 bits))
+        val high = RegInit(B(0, 64 bits))
+      }
+
       if (withRva) when(l1.ATOMIC && !l1.LOAD) {
         iwb.payload(0) := onCtrl.SC_MISS
         iwb.payload(7 downto 1) := 0  // other bits set to 0 by using `LoadSpec(8, ...)` for the instruction
@@ -977,6 +991,21 @@ class LsuPlugin(var layer : LaneLayer,
         p.payload := onCtrl.loadData.RESULT.resized
         if(Riscv.RVD) when(SIZE === 2) {
           p.payload(63 downto 32).setAll()
+        }
+      }
+
+      vecwb.foreach{v =>                // Handling writeback for vector extension
+        v.valid := SEL && !FLOAT && VECTOR
+        v.payload := B(0, 128 bits)
+
+        when(VecOffset === 0 && SEL && !FLOAT && VECTOR) {         // VecOffset = 0: writeback to reg[rd][63:0]
+          vecWriteBackBuffer.low := onCtrl.loadData.RESULT.resized
+          v.payload(63 downto 0) := onCtrl.loadData.RESULT.resized
+          v.payload(127 downto 64) := vecWriteBackBuffer.high
+        }.elsewhen(VecOffset === 1 && SEL && !FLOAT && VECTOR) {   // VecOffset = 1: writeback to reg[rd][127:64]
+          vecWriteBackBuffer.high := onCtrl.loadData.RESULT.resized
+          v.payload(63 downto 0) := vecWriteBackBuffer.low
+          v.payload(127 downto 64) := onCtrl.loadData.RESULT.resized
         }
       }
 

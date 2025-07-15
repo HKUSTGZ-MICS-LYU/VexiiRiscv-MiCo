@@ -4,7 +4,7 @@ import spinal.core._
 import spinal.lib._
 import spinal.lib.misc.plugin.FiberPlugin
 import vexiiriscv.{Global, riscv}
-import vexiiriscv.riscv.{CSR, Const, FloatRegFile, IntRegFile, MicroOp, RS1, RS2, Riscv, Rvi}
+import vexiiriscv.riscv.{CSR, Const, FloatRegFile, IntRegFile, VectorRegFile, MicroOp, RS1, RS2, Riscv, Rvi}
 import AguPlugin._
 import spinal.core.fiber.{Handle, Retainer}
 import spinal.core.sim.SimDataPimper
@@ -73,6 +73,7 @@ class LsuCachelessPlugin(var layer : LaneLayer,
     val elp = host.find[ExecuteLanePlugin](_ == layer.lane)
     val ifp = host.find[IntFormatPlugin](_.lane == layer.lane)
     val fpwbp = host.findOption[WriteBackPlugin](p => p.lane == layer.lane && p.rf == FloatRegFile)
+    val vecwbp = host.findOption[WriteBackPlugin](p => p.lane == layer.lane && p.rf == VectorRegFile)  // Write back for vector extension
     val srcp = host.find[SrcPlugin](_.layer == layer)
     val ats = host[AddressTranslationService]
     val ps = host[PmpService]
@@ -80,7 +81,9 @@ class LsuCachelessPlugin(var layer : LaneLayer,
     val ss = host[ScheduleService]
     val buildBefore = retains(elp.pipelineLock, ats.portsLock, ps.portsLock)
     val atsStorageLock = retains(ats.storageLock)
-    val retainer = retains(List(elp.uopLock, srcp.elaborationLock, ifp.elaborationLock, ts.trapLock, ss.elaborationLock) ++ fpwbp.map(_.elaborationLock))
+    val retainer = retains(List(elp.uopLock, srcp.elaborationLock, ifp.elaborationLock, ts.trapLock, ss.elaborationLock)
+    ++ fpwbp.map(_.elaborationLock)
+    ++ vecwbp.map(_.elaborationLock))
     awaitBuild()
     Riscv.RVA.set(withAmo)
 
@@ -93,6 +96,7 @@ class LsuCachelessPlugin(var layer : LaneLayer,
 
     val iwb = ifp.access(wbAt)
     val fpwb = fpwbp.map(_.createPort(wbAt))
+    val vecwb = vecwbp.map(_.createPort(wbAt))
     val amos = Riscv.RVA.get.option(frontend.amos.uops).toList.flatten
     for(load <- frontend.writingRf ++ amos){
       val op = layer(load)
@@ -120,6 +124,12 @@ class LsuCachelessPlugin(var layer : LaneLayer,
       spec.setCompletion(wbAt)
     }
 
+    vecwbp.foreach(_.addMicroOp(vecwb.get, layer, frontend.writeRfVector))
+    for(vec <- frontend.writeRfVector) {
+      val spec = layer(vec)
+      spec.setCompletion(wbAt)
+    }
+
     for(store <- frontend.writingMem ++ amos) {
       val op = layer(store)
       op.mayFlushUpTo(forkAt)
@@ -138,6 +148,7 @@ class LsuCachelessPlugin(var layer : LaneLayer,
     val injectCtrl = elp.ctrl(0)
     val inject = new injectCtrl.Area {
       SIZE := Decode.UOP(13 downto 12).asUInt
+      VecOffset := Decode.UOP(14).asUInt
     }
 
     // Hardware elaboration
@@ -154,8 +165,15 @@ class LsuCachelessPlugin(var layer : LaneLayer,
       val WRITE_DATA = Payload(Bits(LSLEN bits))
       WRITE_DATA.assignDontCare()
       WRITE_DATA(0, XLEN bits) := up(elp(IntRegFile, riscv.RS2)) // Workaround for op.addRsSpec(RS2, 0) (TODO) ?
-      if(Riscv.withFpu) when(FLOAT) {
+      if(Riscv.withFpu) when(FLOAT){
         WRITE_DATA(0, FLEN bits) := up(elp(FloatRegFile, riscv.RS2))
+      }
+      when(VECTOR){  // Handling memory write for vector extension
+        when(VecOffset === 0) {
+          WRITE_DATA(0, 64 bits) := up(elp(VectorRegFile, riscv.RS2))(63 downto 0)
+        }.elsewhen(VecOffset === 1) {
+          WRITE_DATA(0, 64 bits) := up(elp(VectorRegFile, riscv.RS2))(127 downto 64)
+        }
       }
     }
 
@@ -399,6 +417,11 @@ class LsuCachelessPlugin(var layer : LaneLayer,
       val rspShifted = Bits(LSLEN bits)
       val wordBytes = LSLEN/8
 
+      val vecWriteBackBuffer = new Area {
+        val low = RegInit(B(0, 64 bits))
+        val high = RegInit(B(0, 64 bits))
+      }
+
       // Generate minimal mux to move from a wide aligned memory read to the register file shifter representation
       for (i <- 0 until wordBytes) {
         val srcSize = 1 << (log2Up(wordBytes) - log2Up(i + 1))
@@ -409,7 +432,7 @@ class LsuCachelessPlugin(var layer : LaneLayer,
         rspShifted(i * 8, 8 bits) := src.read(sel)
       }
 
-      iwb.valid := SEL && !FLOAT
+      iwb.valid := SEL && !FLOAT && !VECTOR
       iwb.payload := rspShifted.resized
 
       if (withAmo) when(ATOMIC && !LOAD) {
@@ -418,10 +441,25 @@ class LsuCachelessPlugin(var layer : LaneLayer,
       }
 
       fpwb.foreach{p =>
-        p.valid := SEL && FLOAT
+        p.valid := SEL && FLOAT && !VECTOR
         p.payload := rspShifted.resized
         if(Riscv.RVD) when(SIZE === 2) {
           p.payload(63 downto 32).setAll()
+        }
+      }
+
+      vecwb.foreach{v =>                // Handling writeback for vector extension
+        v.valid := SEL && !FLOAT && VECTOR
+        v.payload := B(0, 128 bits)
+
+        when(VecOffset === 0 && SEL && !FLOAT && VECTOR) {         // VecOffset = 0: writeback to reg[rd][63:0]
+          vecWriteBackBuffer.low := rspShifted.resized
+          v.payload(63 downto 0) := rspShifted.resized
+          v.payload(127 downto 64) := vecWriteBackBuffer.high
+        }.elsewhen(VecOffset === 1 && SEL && !FLOAT && VECTOR) {   // VecOffset = 1: writeback to reg[rd][127:64]
+          vecWriteBackBuffer.high := rspShifted.resized
+          v.payload(63 downto 0) := vecWriteBackBuffer.low
+          v.payload(127 downto 64) := rspShifted.resized
         }
       }
     }

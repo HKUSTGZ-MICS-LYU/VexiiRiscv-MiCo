@@ -41,7 +41,7 @@ object LQ  extends Resource with AreaObject
 object SQ  extends Resource with AreaObject
 object FPU extends Resource with AreaObject
 object RM  extends Resource with AreaObject
-
+object VPU extends Resource with AreaObject // Vector Extension
 
 trait RegfileSpec extends Nameable {
   def sizeArch : Int // How many words it has from a RISC-V perspective (not physically)

@@ -18,7 +18,7 @@ import vexiiriscv.fetch.{FetchCachelessAxi4Plugin, FetchCachelessPlugin, FetchCa
 import vexiiriscv.memory.{MmuPortParameter, MmuSpec, MmuStorageLevel, MmuStorageParameter, PmpParam, PmpPlugin, PmpPortParameter}
 import vexiiriscv.misc._
 import vexiiriscv.prediction.{LearnCmd, LearnPlugin}
-import vexiiriscv.riscv.{FloatRegFile, IntRegFile}
+import vexiiriscv.riscv.{FloatRegFile, IntRegFile, VectorRegFile}
 import vexiiriscv.schedule.DispatchPlugin
 import vexiiriscv.test.WhiteboxerPlugin
 
@@ -130,6 +130,7 @@ class ParamSimple() {
   var fpuAddSharedParam = FpuAddSharedParam()
   var withRvd = false
   var withRvZb = false
+  var withRvv = false // Vector Extension
   var withWhiteboxerOutputs = false
   var privParam = PrivilegedParam.base
   var lsuForkAt = 0
@@ -277,7 +278,7 @@ class ParamSimple() {
 
   def alignerPluginFetchAt = fetchL1Enable.mux(2, 1+fetchForkAt)
   def fetchMemDataWidth = 32*decoders max fetchMemDataWidthMin
-  def lsuMemDataWidth = xlen max lsuMemDataWidthMin max withRvd.mux(64, 0)
+  def lsuMemDataWidth = xlen max lsuMemDataWidthMin max withRvd.mux(64, 0) max withRvv.mux(64, 0)
   def memDataWidth = List(fetchMemDataWidth, lsuMemDataWidth).max
 
   //  Debug modifiers
@@ -493,6 +494,7 @@ class ParamSimple() {
     if (withRvd) isa += "d"
     if (withRvc) isa += "c"
     if (withRvZb) isa += "ZbaZbbZbcZbs"
+    if (withRvv) isa += "v" // Vector Extension
     if (privParam.withSupervisor) isa += "s"
     if (privParam.withUser) isa += "u"
     val r = new ArrayBuffer[String]()
@@ -561,6 +563,7 @@ class ParamSimple() {
     opt[Unit]("with-rvd") action { (v, c) => withRvd = true; withRvf = true }
     opt[Unit]("with-rvc") action { (v, c) => withRvc = true; withAlignerBuffer = true }
     opt[Unit]("with-rvZb") action { (v, c) => withRvZb = true }
+    opt[Unit]("with-rvv") action { (v, c) => withRvv = true }
     opt[Unit]("with-rvZcbm") action { (v, c) => withRvcbm = true }
     opt[Unit]("with-whiteboxer-outputs") action { (v, c) => withWhiteboxerOutputs = true }
     opt[Unit]("with-hart-id-input") action { (v, c) => withHartIdInput = true }
@@ -680,7 +683,7 @@ class ParamSimple() {
 
     val intWritebackAt = 2 //Alias for "trap at" as well
 
-    plugins += new riscv.RiscvPlugin(xlen, hartCount, rvf = withRvf, rvd = withRvd, rvc = withRvc)
+    plugins += new riscv.RiscvPlugin(xlen, hartCount, rvf = withRvf, rvd = withRvd, rvc = withRvc, rvv = withRvv)
     withMmu match {
       case false => plugins += new vexiiriscv.memory.StaticTranslationPlugin(physicalWidth)
       case true => plugins += new vexiiriscv.memory.MmuPlugin(
@@ -830,6 +833,7 @@ class ParamSimple() {
     plugins += lane0
     plugins += new SrcPlugin(early0, executeAt = 0, relaxedRs = relaxedSrc)
     plugins += new IntAluPlugin(early0, formatAt = 0)
+    plugins += new MiCoPlugin(early0)
     plugins += shifter(early0, formatAt = relaxedShift.toInt)
     plugins += new IntFormatPlugin(lane0)
     plugins += new BranchPlugin(layer=early0, aluAt=0, jumpAt=relaxedBranch.toInt, wbAt=0)
@@ -918,7 +922,7 @@ class ParamSimple() {
       plugins += new LsuL1Plugin(
         lane           = lane0,
         memDataWidth   = lsuMemDataWidth,
-        cpuDataWidth   = xlen max withRvd.mux(64, 0),
+        cpuDataWidth   = xlen max withRvd.mux(64, 0) max withRvv.mux(64, 0),
         refillCount    = lsuL1RefillCount,
         writebackCount = lsuL1WritebackCount,
         setCount       = lsuL1Sets,
@@ -1064,6 +1068,23 @@ class ParamSimple() {
     plugins += new WhiteboxerPlugin(
       withOutputs = withWhiteboxerOutputs
     )
+
+    // Plugins for Vector Extension
+    if (withRvv) {
+      plugins += new regfile.RegFilePlugin(
+        spec = riscv.VectorRegFile,
+        physicalDepth = 32,
+        preferedWritePortForInit = "lane0",
+        syncRead = regFileSync,
+        dualPortRam = regFileDualPortRam,
+        maskReadDuringWrite = false
+      )
+      plugins += new execute.vpu.VpuCsrPlugin()
+      plugins += new execute.vpu.VpuAddPlugin(early0)
+      plugins += new execute.vpu.VpuDotPlugin(early0)
+      plugins += new WriteBackPlugin(lane0, VectorRegFile, writeAt = 9, allowBypassFrom = allowBypassFrom.max(2))
+    }
+
   }
 }
 

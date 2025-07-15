@@ -12,7 +12,7 @@ import vexiiriscv.execute.lsu._
 import vexiiriscv.fetch.FetchPipelinePlugin
 import vexiiriscv.memory.{PmpPlugin, PmpService}
 import vexiiriscv.misc.PrivilegedPlugin
-import vexiiriscv.riscv.FloatRegFile
+import vexiiriscv.riscv.{FloatRegFile, VectorRegFile}
 //import vexiiriscv.execute.LsuCachelessPlugin
 import vexiiriscv.fetch.Fetch
 import vexiiriscv.riscv.{IntRegFile, Riscv}
@@ -215,6 +215,7 @@ class VexiiRiscvProbe(cpu : VexiiRiscv, kb : Option[konata.Backend], var withRvl
         if (get(Riscv.RVF)) isa += "F"
         if (get(Riscv.RVD)) isa += "D"
         if (get(Riscv.RVC)) isa += "C"
+        if (get(Riscv.RVV)) isa += "V"
         if (get(Riscv.RVZba)) isa += "_zba"
         if (get(Riscv.RVZbb)) isa += "_zbb"
         if (get(Riscv.RVZbc)) isa += "_zbc"
@@ -265,6 +266,8 @@ class VexiiRiscvProbe(cpu : VexiiRiscv, kb : Option[konata.Backend], var withRvl
     var floatWriteValid = false
     var floatWriteData = -1l
     var floatFlags = -1
+    var vectorWriteValid = false
+    var vectorWriteData: BigInt = BigInt(-1)
 
     var csrValid = false
     var csrWriteDone = false
@@ -332,6 +335,7 @@ class VexiiRiscvProbe(cpu : VexiiRiscv, kb : Option[konata.Backend], var withRvl
       commit = false
       integerWriteValid = false;
       floatWriteValid = false;
+      vectorWriteValid = false;
       csrValid = false;
       csrWriteDone = false;
       csrReadDone = false;
@@ -484,6 +488,10 @@ class VexiiRiscvProbe(cpu : VexiiRiscv, kb : Option[konata.Backend], var withRvl
         case FloatRegFile => {
           ctx.floatWriteValid = true
           ctx.floatWriteData = port.data.toLong | floatOr
+        }
+        case VectorRegFile => {
+          ctx.vectorWriteValid = true
+          // ctx.vectorWriteData = port.data.toBigInt
         }
       }
     }

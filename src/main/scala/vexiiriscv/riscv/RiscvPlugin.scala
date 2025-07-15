@@ -13,20 +13,22 @@ class RiscvPlugin(var xlen : Int,
                   var hartCount : Int,
                   var rvc: Boolean,
                   var rvf: Boolean,
-                  var rvd: Boolean) extends FiberPlugin {
+                  var rvd: Boolean,
+                  var rvv: Boolean) extends FiberPlugin {
 
   val logic = during build new Area {
     if(Riscv.RVC.isEmpty) Riscv.RVC.set(rvc)
     if(Riscv.RVM.isEmpty) Riscv.RVM.set(false)
     if(Riscv.RVF.isEmpty) Riscv.RVF.set(rvf)
     if(Riscv.RVD.isEmpty) Riscv.RVD.set(rvd)
+    if(Riscv.RVV.isEmpty) Riscv.RVV.set(rvv)
     if(Riscv.RVZba.isEmpty) Riscv.RVZba.set(false)
     if(Riscv.RVZbb.isEmpty) Riscv.RVZbb.set(false)
     if(Riscv.RVZbc.isEmpty) Riscv.RVZbc.set(false)
     if(Riscv.RVZbs.isEmpty) Riscv.RVZbs.set(false)
     Riscv.XLEN.set(xlen)
     Riscv.FLEN.set(List(Riscv.RVF.get.toInt*32, Riscv.RVD.get.toInt*64).max)
-    Riscv.LSLEN.set(List(Riscv.XLEN.get, Riscv.FLEN.get).max)
+    Riscv.LSLEN.set(List(Riscv.XLEN.get, Riscv.FLEN.get, Riscv.RVV.get.toInt*64).max)
     Global.HART_COUNT.set(hartCount)
     Fetch.SLICE_WIDTH.set(if(Riscv.RVC) 16 else 32)
     Fetch.SLICE_BYTES.set(if(Riscv.RVC) 2 else 4)
