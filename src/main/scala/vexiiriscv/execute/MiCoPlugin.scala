@@ -17,17 +17,16 @@ object QType extends SpinalEnum(defaultEncoding=binaryOneHot){
 }
 
 object MiCoCompute extends AreaObject {
-    def DotProduct(op_a : Bits, op_b : Bits, vlen : Int) : SInt = {
-        val a_vec = op_a.subdivideIn(vlen slices)
-        val b_vec = op_b.subdivideIn(vlen slices)
+    def DotProduct(op_a : Bits, op_b : Bits, bitWidth : Int) : SInt = {
+        val a_vec = op_a.subdivideIn(bitWidth bits)
+        val b_vec = op_b.subdivideIn(bitWidth bits)
         val a_tmp = Vec(a_vec.zip(b_vec).map{case (a_i, b_i) => a_i.asSInt * b_i.asSInt})
-        a_tmp.reduceBalancedTree(_ +^ _).resize(32)
+        a_tmp.reduceBalancedTree(_ +^ _).resize(Riscv.XLEN.get)
     }
 
     def DotProductSym2Bit(op_a : Bits, op_b : Bits) : SInt = {
-        val vlen = 16
-        val a_vec = op_a.subdivideIn(vlen slices)
-        val b_vec = op_b.subdivideIn(vlen slices)
+        val a_vec = op_a.subdivideIn(2 bits)
+        val b_vec = op_b.subdivideIn(2 bits)
 
         val a_tmp = a_vec.zip(b_vec).map{
             case (a_i, w_i) => {
@@ -44,47 +43,13 @@ object MiCoCompute extends AreaObject {
         }
         // A more accurate implementation, but larger area
         // val a_tmp = Vec(a_vec.zip(b_vec).map{case (a_i, b_i) => a_i.asSInt * b_i.asSInt})
-        a_tmp.reduceBalancedTree(_ +^ _).resize(32)
+        a_tmp.reduceBalancedTree(_ +^ _).resize(Riscv.XLEN.get)
     }
 
     def DotProductSym1Bit(op_a : Bits, op_b : Bits) : SInt = {
         val xor = (op_a ^ op_b).asBools
         val count_n = xor.sCount(True)         // True is -1
-        (S(32) - (count_n << 1).asSInt).resize(32)
-    }
-
-    def DotProductAsym1Bit(op_a : Bits, op_b : Bits) : SInt = {
-        // Let's assume XLEN == 32 here
-        val vlen = 4 // 4 x 8-bit integer vector
-        val a_vec = op_a.subdivideIn(vlen slices)
-        val b_vec = op_b.subdivideIn(vlen slices)
-        val a_tmp = Vec(a_vec.zip(b_vec).map{
-            case (a_i, b_i) => (b_i.asBool ? -a_i.asSInt | a_i.asSInt)})
-        a_tmp.reduceBalancedTree(_ +^ _).resize(32)
-    }
-
-    def DotProductAsym2Bit(op_a : Bits, op_b : Bits) : SInt = {
-        // Let's assume XLEN == 32 here
-        val vlen = 4 // 4 x 8-bit integer vector
-        val a_vec = op_a.subdivideIn(vlen slices)
-        val b_vec = op_b.subdivideIn(vlen slices)
-
-        val a_tmp = a_vec.zip(b_vec).map{
-            case (a_i, w_i) => {
-                val a_tmp_i = SInt(8 bits)
-                val neg_a  = -(a_i.asSInt)
-                val neg_2a = neg_a |<< 1
-                a_tmp_i := w_i.muxList(
-                    List((B"2'b01", a_i.asSInt),
-                        ( B"2'b11", neg_a),
-                        ( B"2'b10", neg_2a),
-                        ( B"2'b00", S(0))))
-                a_tmp_i
-            }
-        }
-        // A more accurate implementation, but larger area
-        // val a_tmp = Vec(a_vec.zip(b_vec).map{case (a_i, b_i) => a_i.asSInt * b_i.asSInt})
-        a_tmp.reduceBalancedTree(_ +^ _).resize(32)
+        (S(Riscv.XLEN.get) - (count_n << 1).asSInt).resize(Riscv.XLEN.get)
     }
 
     def Extend1bTo2b(op : Bits) : Bits = {
@@ -103,9 +68,9 @@ object MiCoCompute extends AreaObject {
         }.reduce(_ ## _)
         ext
     }
-    def ExtendTo8b(op : Bits) : Bits = {
+    def ExtendTo8b(op : Bits, bitWidth: Int) : Bits = {
         // Sign Extend 4-bit to 8-bit
-        val ext = op.subdivideIn(4 slices).reverse.map{
+        val ext = op.subdivideIn(bitWidth bits).reverse.map{
             i => i.asSInt.resize(8).asBits
         }.reduce(_ ## _)
         ext
@@ -134,10 +99,13 @@ object MiCoPlugin {
     // 32 * 1-bit vector DotP 32 * 1-bit vector
     val DOTP1x1   = IntRegFile.TypeR(M"0001000----------111-----0001011")
 
+    val xlen = Riscv.XLEN.get
+    val xlenLog2 = log2Up(xlen)
+
     val AQ = Payload(QType())  // 1 2 4 8
     val WQ = Payload(QType())  // 1 2 4 8
 
-    val INC = Payload(UInt(5 bits)) // Increment Bits (0, 4, 8, 16)
+    val INC = Payload(UInt(xlenLog2 bits)) // Increment Bits (0, 4, 8, 16, 32)
 }
 
 class MiCoPlugin(val layer : LaneLayer) 
@@ -145,9 +113,6 @@ class MiCoPlugin(val layer : LaneLayer)
 
     val logic = during setup new Logic {
         awaitBuild()
-
-        //Let's assume we only support RV32 for now
-        assert(Riscv.XLEN.get == 32)
 
         //Let's get the hardware interface that we will use to provide the result of our custom instruction
         val wb = newWriteback(ifp, 0)
@@ -158,22 +123,22 @@ class MiCoPlugin(val layer : LaneLayer)
         import SrcKeys._
 
         // 8-bit Engine Data Path
-        add(DOTP8x8).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q8, INC -> U"5'd00")
-        add(DOTP8x4).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q4, INC -> U"5'd16")
-        add(DOTP8x2).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q2, INC -> U"5'd08")
-        add(DOTP8x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q1, INC -> U"5'd04")
+        add(DOTP8x8).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q8, INC -> U(0))
+        add(DOTP8x4).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q4, INC -> U(xlen/2))
+        add(DOTP8x2).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q2, INC -> U(xlen/4))
+        add(DOTP8x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q1, INC -> U(xlen/8))
 
         // 4-bit Engine Data Path
-        add(DOTP4x4).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q4, WQ -> Q4, INC -> U"5'd00")
-        add(DOTP4x2).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q4, WQ -> Q2, INC -> U"5'd16")
-        add(DOTP4x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q4, WQ -> Q1, INC -> U"5'd08")
+        add(DOTP4x4).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q4, WQ -> Q4, INC -> U(0))
+        add(DOTP4x2).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q4, WQ -> Q2, INC -> U(xlen/2))
+        add(DOTP4x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q4, WQ -> Q1, INC -> U(xlen/4))
 
         // 2-bit Engine Data Path
-        add(DOTP2x2).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q2, WQ -> Q2, INC -> U"5'd00")
-        add(DOTP2x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q2, WQ -> Q1, INC -> U"5'd16")
+        add(DOTP2x2).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q2, WQ -> Q2, INC -> U(0))
+        add(DOTP2x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q2, WQ -> Q1, INC -> U(xlen/2))
 
         // 1-bit Engine Data Path
-        add(DOTP1x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q1, WQ -> Q1, INC -> U"5'd00")
+        add(DOTP1x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q1, WQ -> Q1, INC -> U(0))
 
         //Now that we are done specifying everything about the instructions, we can release the Logic.uopRetainer
         //This will allow a few other plugins to continue their elaboration (ex : decoder, dispatcher, ...)
@@ -182,46 +147,45 @@ class MiCoPlugin(val layer : LaneLayer)
         //Let's define some logic in the execute lane [0]
         val process = new el.Execute(id = 0) {
             //Get the RISC-V RS1/RS2 values from the register file
-            val rs1 = el(IntRegFile, RS1)  // rs1 holds the 1st vector (A)
-            val rs2 = el(IntRegFile, RS2)  // rs2 holds the 2nd vector (W)
+            val rs1 = el(IntRegFile, RS1).asBits  // rs1 holds the 1st vector
+            val rs2 = el(IntRegFile, RS2).asBits  // rs2 holds the 2nd vector
 
-            val rd = Bits(32 bits)
-            val offset = Reg(UInt(log2Up(32) bits)) init(0)        
+            val rd = Bits(xlen bits)
+            val offset = Reg(UInt(xlenLog2 bits)) init(0)
 
             when(isValid && SEL){
                 offset := offset + INC
             }
 
-            val W32b = rs2.asBits
-            val W16b = rs2(offset, 16 bits)
-            val W8b  = rs2(offset,  8 bits)
-            val W4b  = rs2(offset,  4 bits)
+            val rs2d2 = rs2(offset, xlen/2 bits)
+            val rs2d4 = rs2(offset, xlen/4 bits)
+            val rs2d8 = rs2(offset, xlen/8 bits)
 
             val ToDOTP8 = WQ.mux(
-                Q8 -> W32b,
-                Q4 -> ExtendTo8b(W16b),
-                Q2 -> ExtendTo8b(Extend2bTo4b(W8b)),
-                Q1 -> ExtendTo8b(Extend1bTo2b(W4b))
+                Q8 -> rs2,
+                Q4 -> ExtendTo8b(rs2d2, bitWidth = 4),
+                Q2 -> ExtendTo8b(Extend2bTo4b(rs2d4), bitWidth = 4),
+                Q1 -> ExtendTo8b(Extend1bTo2b(rs2d8), bitWidth = 2)
             )
             val ToDOTP4 = WQ.mux(
-                Q4 -> W32b,
-                Q2 -> Extend2bTo4b(W16b),
-                Q1 -> Extend2bTo4b(Extend1bTo2b(W8b)),
-                default -> B"32'b0" // Invalid
+                Q4 -> rs2,
+                Q2 -> Extend2bTo4b(rs2d2),
+                Q1 -> Extend2bTo4b(Extend1bTo2b(rs2d4)),
+                default -> B(0, xlen bits) // Invalid
             )
             val ToDOTP2 = WQ.mux(
-                Q2 -> W32b,
-                Q1 -> Extend1bTo2b(W16b),
-                default -> B"32'b0" // Invalid
+                Q2 -> rs2,
+                Q1 -> Extend1bTo2b(rs2d2),
+                default -> B(0, xlen bits) // Invalid
             )
             val ToDOTP1 = WQ.mux(
-                Q1 -> W32b,
-                default -> B"32'b0" // Invalid
+                Q1 -> rs2,
+                default -> B(0, xlen bits) // Invalid
             )
 
             val result = AQ.mux(
-                Q8 -> DotProduct(rs1, ToDOTP8, 4),
-                Q4 -> DotProduct(rs1, ToDOTP4, 8),
+                Q8 -> DotProduct(rs1, ToDOTP8, bitWidth = 8),
+                Q4 -> DotProduct(rs1, ToDOTP4, bitWidth = 4),
                 Q2 -> DotProductSym2Bit(rs1, ToDOTP2),
                 Q1 -> DotProductSym1Bit(rs1, ToDOTP1)
             )
