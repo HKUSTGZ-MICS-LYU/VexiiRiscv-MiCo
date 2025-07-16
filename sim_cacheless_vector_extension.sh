@@ -1,4 +1,5 @@
 sbt "runMain vexiiriscv.tester.TestBench \
+    --vlen=128 \
     --with-rvv \
     --with-rvc \
     --with-rva \

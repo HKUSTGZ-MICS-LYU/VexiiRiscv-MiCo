@@ -994,20 +994,20 @@ class LsuPlugin(var layer : LaneLayer,
         }
       }
 
-      vecwb.foreach{v =>                // Handling writeback for vector extension
-        v.valid := SEL && !FLOAT && VECTOR
-        v.payload := B(0, 128 bits)
+      // vecwb.foreach{v =>                // Handling writeback for vector extension
+      //   v.valid := SEL && !FLOAT && VECTOR
+      //   v.payload := B(0, 128 bits)
 
-        when(VecOffset === 0 && SEL && !FLOAT && VECTOR) {         // VecOffset = 0: writeback to reg[rd][63:0]
-          vecWriteBackBuffer.low := onCtrl.loadData.RESULT.resized
-          v.payload(63 downto 0) := onCtrl.loadData.RESULT.resized
-          v.payload(127 downto 64) := vecWriteBackBuffer.high
-        }.elsewhen(VecOffset === 1 && SEL && !FLOAT && VECTOR) {   // VecOffset = 1: writeback to reg[rd][127:64]
-          vecWriteBackBuffer.high := onCtrl.loadData.RESULT.resized
-          v.payload(63 downto 0) := vecWriteBackBuffer.low
-          v.payload(127 downto 64) := onCtrl.loadData.RESULT.resized
-        }
-      }
+      //   when(vecOffset === 0 && SEL && !FLOAT && VECTOR) {         // VecOffset = 0: writeback to reg[rd][63:0]
+      //     vecWriteBackBuffer.low := onCtrl.loadData.RESULT.resized
+      //     v.payload(63 downto 0) := onCtrl.loadData.RESULT.resized
+      //     v.payload(127 downto 64) := vecWriteBackBuffer.high
+      //   }.elsewhen(vecOffset === 1 && SEL && !FLOAT && VECTOR) {   // VecOffset = 1: writeback to reg[rd][127:64]
+      //     vecWriteBackBuffer.high := onCtrl.loadData.RESULT.resized
+      //     v.payload(63 downto 0) := vecWriteBackBuffer.low
+      //     v.payload(127 downto 64) := onCtrl.loadData.RESULT.resized
+      //   }
+      // }
 
       val storeFire      = down.isFiring && AguPlugin.SEL && l1.STORE && !onPma.IO && !FROM_PREFETCH
       val storeBroadcast = down.isReady && l1.SEL && l1.STORE && !l1.ABORD && !l1.SKIP_WRITE && !l1.MISS && !l1.MISS_UNIQUE && !l1.HAZARD

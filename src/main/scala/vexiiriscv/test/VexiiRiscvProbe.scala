@@ -491,7 +491,6 @@ class VexiiRiscvProbe(cpu : VexiiRiscv, kb : Option[konata.Backend], var withRvl
         }
         case VectorRegFile => {
           ctx.vectorWriteValid = true
-          // ctx.vectorWriteData = port.data.toBigInt
         }
       }
     }

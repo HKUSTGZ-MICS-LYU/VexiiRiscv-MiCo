@@ -10,6 +10,7 @@ import vexiiriscv.fetch.Fetch
  * The aim of this plugin is mostly to serve as a RISC-V CPU parameter trampoline to globally shared constants
  */
 class RiscvPlugin(var xlen : Int,
+                  var vlen : Int,
                   var hartCount : Int,
                   var rvc: Boolean,
                   var rvf: Boolean,
@@ -27,6 +28,7 @@ class RiscvPlugin(var xlen : Int,
     if(Riscv.RVZbc.isEmpty) Riscv.RVZbc.set(false)
     if(Riscv.RVZbs.isEmpty) Riscv.RVZbs.set(false)
     Riscv.XLEN.set(xlen)
+    Riscv.VLEN.set(vlen)
     Riscv.FLEN.set(List(Riscv.RVF.get.toInt*32, Riscv.RVD.get.toInt*64).max)
     Riscv.LSLEN.set(List(Riscv.XLEN.get, Riscv.FLEN.get, Riscv.RVV.get.toInt*64).max)
     Global.HART_COUNT.set(hartCount)

@@ -7,6 +7,7 @@ import spinal.lib.misc.pipeline._
 object Riscv extends AreaObject {
   val XLEN = blocking[Int]
   val FLEN = blocking[Int]
+  val VLEN = blocking[Int]
   val LSLEN = blocking[Int]
   val RVC, RVM, RVD, RVF, RVA, RVV, RVZba, RVZbb, RVZbc, RVZbs, RVZcbm = blocking[Boolean]
   def withFpu = RVF || RVD

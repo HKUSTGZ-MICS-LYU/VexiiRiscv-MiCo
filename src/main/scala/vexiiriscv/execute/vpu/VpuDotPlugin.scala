@@ -97,25 +97,25 @@ class VpuDotPlugin(val layer: LaneLayer)
             }
 
             val raw_rs2 = rs2.asBits
-            val rs2_64 = rs2(offset, 64 bits)
-            val rs2_32 = rs2(offset, 32 bits)
+            val rs2_half = rs2(offset, (Riscv.VLEN.get/2) bits)
+            val rs2_qter = rs2(offset, (Riscv.VLEN.get/4) bits)
 
             val ToDOTP8 = config.getRS2Width().mux(
                 U(3) -> raw_rs2,
-                U(2) -> Extend4bTo8b(rs2_64),
-                U(1) -> Extend4bTo8b(Extend2bTo4b(rs2_32)),
-                default -> B(0, 128 bits)
+                U(2) -> Extend4bTo8b(rs2_half),
+                U(1) -> Extend4bTo8b(Extend2bTo4b(rs2_qter)),
+                default -> B(0, Riscv.VLEN.get bits)
             )
 
             val ToDOTP4 = config.getRS2Width().mux(
                 U(2) -> raw_rs2,
-                U(1) -> Extend2bTo4b(rs2_64),
-                default -> B(0, 128 bits)
+                U(1) -> Extend2bTo4b(rs2_half),
+                default -> B(0, Riscv.VLEN.get bits)
             )
 
             val ToDOTP2 = config.getRS2Width().mux(
                 U(1) -> raw_rs2,
-                default -> B(0, 128 bits)
+                default -> B(0, Riscv.VLEN.get bits)
             )
 
             val result = config.getRS1Width().mux(

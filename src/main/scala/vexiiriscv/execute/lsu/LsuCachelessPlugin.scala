@@ -12,7 +12,7 @@ import vexiiriscv.decode.Decode
 import vexiiriscv.fetch.FetchPipelinePlugin
 import vexiiriscv.memory.{AddressTranslationPortUsage, AddressTranslationService, DBusAccessService, PmaLoad, PmaLogic, PmaPort, PmaStore, PmpService}
 import vexiiriscv.misc.{AddressToMask, LsuTriggerService, PerformanceCounterService, TrapArg, TrapReason, TrapService}
-import vexiiriscv.riscv.Riscv.{FLEN, LSLEN, XLEN}
+import vexiiriscv.riscv.Riscv.{FLEN, LSLEN, XLEN, VLEN}
 import spinal.lib.misc.pipeline._
 import spinal.lib.system.tag.PmaRegion
 import vexiiriscv.decode.Decode.{INSTRUCTION_SLICE_COUNT_WIDTH, UOP}
@@ -94,6 +94,8 @@ class LsuCachelessPlugin(var layer : LaneLayer,
     val flushPort = ss.newFlushPort(layer.lane.getExecuteAge(forkAt), laneAgeWidth = Execute.LANE_AGE_WIDTH, withUopId = true)
     val frontend = new AguFrontend(layer, host)
 
+    val vecOffset = Reg(UInt(log2Up(VLEN/64) bits)) init(0)
+
     val iwb = ifp.access(wbAt)
     val fpwb = fpwbp.map(_.createPort(wbAt))
     val vecwb = vecwbp.map(_.createPort(wbAt))
@@ -126,6 +128,7 @@ class LsuCachelessPlugin(var layer : LaneLayer,
 
     vecwbp.foreach(_.addMicroOp(vecwb.get, layer, frontend.writeRfVector))
     for(vec <- frontend.writeRfVector) {
+      vecOffset := U(0)
       val spec = layer(vec)
       spec.setCompletion(wbAt)
     }
@@ -148,7 +151,6 @@ class LsuCachelessPlugin(var layer : LaneLayer,
     val injectCtrl = elp.ctrl(0)
     val inject = new injectCtrl.Area {
       SIZE := Decode.UOP(13 downto 12).asUInt
-      VecOffset := Decode.UOP(14).asUInt
     }
 
     // Hardware elaboration
@@ -167,13 +169,6 @@ class LsuCachelessPlugin(var layer : LaneLayer,
       WRITE_DATA(0, XLEN bits) := up(elp(IntRegFile, riscv.RS2)) // Workaround for op.addRsSpec(RS2, 0) (TODO) ?
       if(Riscv.withFpu) when(FLOAT){
         WRITE_DATA(0, FLEN bits) := up(elp(FloatRegFile, riscv.RS2))
-      }
-      when(VECTOR){  // Handling memory write for vector extension
-        when(VecOffset === 0) {
-          WRITE_DATA(0, 64 bits) := up(elp(VectorRegFile, riscv.RS2))(63 downto 0)
-        }.elsewhen(VecOffset === 1) {
-          WRITE_DATA(0, 64 bits) := up(elp(VectorRegFile, riscv.RS2))(127 downto 64)
-        }
       }
     }
 
@@ -417,10 +412,8 @@ class LsuCachelessPlugin(var layer : LaneLayer,
       val rspShifted = Bits(LSLEN bits)
       val wordBytes = LSLEN/8
 
-      val vecWriteBackBuffer = new Area {
-        val low = RegInit(B(0, 64 bits))
-        val high = RegInit(B(0, 64 bits))
-      }
+      val vecWbCnt = (VLEN / 64) - 1
+      val vecWbBuffer = Vec(Reg(Bits(64 bits)), VLEN/64)
 
       // Generate minimal mux to move from a wide aligned memory read to the register file shifter representation
       for (i <- 0 until wordBytes) {
@@ -449,17 +442,35 @@ class LsuCachelessPlugin(var layer : LaneLayer,
       }
 
       vecwb.foreach{v =>                // Handling writeback for vector extension
-        v.valid := SEL && !FLOAT && VECTOR
-        v.payload := B(0, 128 bits)
+        v.valid := False
+        v.payload := B(0, VLEN.get bits)
 
-        when(VecOffset === 0 && SEL && !FLOAT && VECTOR) {         // VecOffset = 0: writeback to reg[rd][63:0]
-          vecWriteBackBuffer.low := rspShifted.resized
-          v.payload(63 downto 0) := rspShifted.resized
-          v.payload(127 downto 64) := vecWriteBackBuffer.high
-        }.elsewhen(VecOffset === 1 && SEL && !FLOAT && VECTOR) {   // VecOffset = 1: writeback to reg[rd][127:64]
-          vecWriteBackBuffer.high := rspShifted.resized
-          v.payload(63 downto 0) := vecWriteBackBuffer.low
-          v.payload(127 downto 64) := rspShifted.resized
+        when(SEL && !FLOAT && VECTOR) {
+          vecWbBuffer(vecOffset) := rspShifted.resized
+          vecOffset := vecOffset + 1
+          when(vecOffset === vecWbCnt) {
+            if (VLEN.get == 128) {
+              v.payload(63 downto 0) := vecWbBuffer(0)
+              v.payload(127 downto 64) := rspShifted.resized
+              v.valid := True
+            } else if (VLEN.get == 256) {
+              v.payload(63 downto 0) := vecWbBuffer(0)
+              v.payload(127 downto 64) := vecWbBuffer(1)
+              v.payload(191 downto 128) := vecWbBuffer(2)
+              v.payload(255 downto 192) := rspShifted.resized
+              v.valid := True
+            } else if (VLEN.get == 512) {
+              v.payload(63 downto 0) := vecWbBuffer(0)
+              v.payload(127 downto 64) := vecWbBuffer(1)
+              v.payload(191 downto 128) := vecWbBuffer(2)
+              v.payload(255 downto 192) := vecWbBuffer(3)
+              v.payload(319 downto 256) := vecWbBuffer(4)
+              v.payload(383 downto 320) := vecWbBuffer(5)
+              v.payload(447 downto 384) := vecWbBuffer(6)
+              v.payload(511 downto 448) := rspShifted.resized
+              v.valid := True
+            }
+          }
         }
       }
     }

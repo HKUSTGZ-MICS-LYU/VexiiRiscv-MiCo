@@ -18,7 +18,6 @@ object AguPlugin extends AreaObject {
   val STORE = Payload(Bool())
   val ATOMIC = Payload(Bool()) // LR => ATOMIC && LOAD && !STORE, SC => ATOMIC && !LOAD && STORE, AMO => ATOMIC && LOAD && STORE
   val SIZE = Payload(UInt(2 bits)) // bytes = 1 << SIZE
-  val VecOffset = Payload(UInt(1 bits)) // high(127-64) or low(63-0) bits of a 128bits vector register
   val FLOAT = Payload(Bool())
   val VECTOR = Payload(Bool())
   val CLEAN, INVALIDATE = Payload(Bool())
@@ -59,8 +58,7 @@ class AguFrontend(
   writingRf ++= writeRfFloat
 
   val writeRfVector = ArrayBuffer[MicroOp]()
-  writeRfVector ++= List(VectorExt.VecLDLow)
-  writeRfVector ++= List(VectorExt.VecLDHigh)
+  writeRfVector ++= List(VectorExt.VecLD)
   writingRf ++= writeRfVector
   for (op <- writingRf) add(op).srcs(sk.Op.ADD, sk.SRC1.RF, sk.SRC2.I).decode(dec(LOAD -> True, FLOAT -> Bool(writeRfFloat.contains(op)), VECTOR -> Bool(writeRfVector.contains(op))))
 
@@ -71,10 +69,6 @@ class AguFrontend(
   for (store <- writingMem) add(store).srcs(storeOps).decode(dec(STORE -> True))
   if (RVF) writingMem += add(Rvfd.FSW).srcs(storeOps).decode(dec(STORE -> True, FLOAT -> True)).uop
   if (RVD) writingMem += add(Rvfd.FSD).srcs(storeOps).decode(dec(STORE -> True, FLOAT -> True)).uop
-
-  // Vector store
-  val writeMemVector = ArrayBuffer[MicroOp](VectorExt.VecSTLow, VectorExt.VecSTHigh)
-  for (store <- writeMemVector) writingMem += add(store).srcs(storeOps).decode(dec(STORE -> True, VECTOR -> True)).uop
 
   // Atomic stuff
   val amos = RVA.get generate new Area {

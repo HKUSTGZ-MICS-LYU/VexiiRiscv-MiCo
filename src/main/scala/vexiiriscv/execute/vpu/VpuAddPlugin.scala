@@ -48,13 +48,13 @@ class VpuAddPlugin(val layer: LaneLayer)
             val rs1 = el(VectorRegFile, RS1)  // rs1 holds the 1st vector
             val rs2 = el(VectorRegFile, RS2)  // rs2 holds the 2nd vector
 
-            val rd = Bits(128 bits)
+            val rd = Bits(Riscv.VLEN.get bits)
 
             val result = config.getRS1Width().mux(
                 U(3) -> VecAdd(rs1, rs2, 8),
                 U(2) -> VecAdd(rs1, rs2, 4),
                 U(1) -> VecAdd(rs1, rs2, 2),
-                default -> B(0, 128 bits)
+                default -> B(0, Riscv.VLEN.get bits)
             )
 
             rd := result.asBits

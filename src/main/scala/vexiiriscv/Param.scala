@@ -99,6 +99,7 @@ object ParamSimple{
  */
 class ParamSimple() {
   var xlen = 32
+  var vlen = 128
   var withRvc = false
   var withAlignerBuffer = false
   var withDispatcherBuffer = false
@@ -528,6 +529,7 @@ class ParamSimple() {
   def addOptions(parser: scopt.OptionParser[Unit]) = {
     import parser._
     opt[Int]("xlen") action { (v, c) => xlen = v }
+    opt[Int]("vlen") action { (v, c) => vlen = v }
     opt[Int]("decoders") action { (v, c) => decoders = v }
     opt[Int]("lanes") action { (v, c) => lanes = v }
     opt[Int]("decoder-at") action { (v, c) => decoderAt = v }
@@ -683,7 +685,7 @@ class ParamSimple() {
 
     val intWritebackAt = 2 //Alias for "trap at" as well
 
-    plugins += new riscv.RiscvPlugin(xlen, hartCount, rvf = withRvf, rvd = withRvd, rvc = withRvc, rvv = withRvv)
+    plugins += new riscv.RiscvPlugin(xlen, vlen, hartCount, rvf = withRvf, rvd = withRvd, rvc = withRvc, rvv = withRvv)
     withMmu match {
       case false => plugins += new vexiiriscv.memory.StaticTranslationPlugin(physicalWidth)
       case true => plugins += new vexiiriscv.memory.MmuPlugin(

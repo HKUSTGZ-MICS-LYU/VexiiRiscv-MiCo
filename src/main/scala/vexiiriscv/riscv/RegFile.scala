@@ -139,7 +139,7 @@ object FloatRegFile extends RegfileSpec with AreaObject {
 
 object VectorRegFile extends RegfileSpec with AreaObject {
   override def sizeArch = 32
-  override def width = 128
+  override def width = Riscv.VLEN
   override def x0AlwaysZero = false
   override def getName() = "vector"
   override def initialValue: BigInt = 0 // Initialization of Vector Registers
@@ -155,9 +155,5 @@ object VectorRegFile extends RegfileSpec with AreaObject {
   def TypeILQ(key : MaskedLiteral) = SingleDecoding(
     key = key,
     resources = List(IntRegFile -> RS1, VectorRegFile -> RD, LQ, PC_READ) :+ VPU//PC_READ is used to reschedule a load which had some store hazard
-  )
-  def TypeSSQ(key : MaskedLiteral) = SingleDecoding(
-    key = key,
-    resources = List(IntRegFile -> RS1, VectorRegFile -> RS2, SQ) :+ VPU
   )
 }
