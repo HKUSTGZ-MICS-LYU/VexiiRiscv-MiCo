@@ -1,5 +1,5 @@
 sbt "runMain vexiiriscv.tester.TestBench \
-    --vlen=512 \
+    --vlen=128 \
     --with-rvv \
     --with-rvc \
     --with-rva \
@@ -8,6 +8,14 @@ sbt "runMain vexiiriscv.tester.TestBench \
     --with-late-alu \
     --allow-bypass-from 0 \
     --div-radix 4 \
+    --lsu-l1 \
+    --fetch-l1 \
     --load-elf $1 \
     --no-rvls-check \
+    --lsu-l1-writeback-count 8 \
+    --lsu-l1-sets 64 \
+    --lsu-l1-ways 4 \
+    --lsu-l1-refill-count 8 \
+    --lsu-l1-store-buffer-slots 4 \
+    --lsu-l1-store-buffer-ops 32 \
     --print-stats"

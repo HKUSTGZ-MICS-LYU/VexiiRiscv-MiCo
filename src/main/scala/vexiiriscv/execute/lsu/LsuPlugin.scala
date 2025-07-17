@@ -14,7 +14,7 @@ import vexiiriscv.decode.{Decode, DecoderService}
 import vexiiriscv.decode.Decode.UOP
 import vexiiriscv.memory.{AddressTranslationPortUsage, AddressTranslationService, DBusAccessService, PmaLoad, PmaLogic, PmaPort, PmaStore, PmpService}
 import vexiiriscv.misc.{AddressToMask, LsuTriggerService, PerformanceCounterService, PrivilegedPlugin, TrapArg, TrapReason, TrapService}
-import vexiiriscv.riscv.Riscv.{FLEN, LSLEN, XLEN}
+import vexiiriscv.riscv.Riscv.{FLEN, LSLEN, XLEN, VLEN}
 import vexiiriscv.riscv._
 import vexiiriscv.schedule.{DispatchPlugin, ScheduleService}
 import vexiiriscv.{Global, riscv}
@@ -131,6 +131,7 @@ class LsuPlugin(var layer : LaneLayer,
     val retainer = retains(List(elp.uopLock, srcp.elaborationLock, ifp.elaborationLock, ts.trapLock, ss.elaborationLock)
     ++ fpwbp.map(_.elaborationLock)
     ++ vecwbp.map(_.elaborationLock))
+    awaitBuild()
     Riscv.RVA.set(withRva)
 
     // * Instanciate a few hardware interfaces *
@@ -183,7 +184,9 @@ class LsuPlugin(var layer : LaneLayer,
     }
 
     vecwbp.foreach(_.addMicroOp(vecwb.get, layer, frontend.writeRfVector))
+    val vecOffset = Reg(UInt(log2Up(VLEN/64) bits)) init(0)
     for(vec <- frontend.writeRfVector) {
+      vecOffset := U(0)
       val spec = layer(vec)
       spec.setCompletion(wbAt)
     }
@@ -973,13 +976,11 @@ class LsuPlugin(var layer : LaneLayer,
 
     // Drive the write back interface
     val onWb = new elp.Execute(wbAt){
-      iwb.valid := SEL && !FLOAT
+      iwb.valid := SEL && !FLOAT && !VECTOR
       iwb.payload := onCtrl.loadData.RESULT.resized
 
-      val vecWriteBackBuffer = new Area {
-        val low = RegInit(B(0, 64 bits))
-        val high = RegInit(B(0, 64 bits))
-      }
+      val vecWbCnt = (VLEN / 64) - 1
+      val vecWbBuffer = Vec(Reg(Bits(64 bits)), VLEN/64)
 
       if (withRva) when(l1.ATOMIC && !l1.LOAD) {
         iwb.payload(0) := onCtrl.SC_MISS
@@ -987,27 +988,45 @@ class LsuPlugin(var layer : LaneLayer,
       }
 
       fpwb.foreach{p =>
-        p.valid := SEL && FLOAT
+        p.valid := SEL && FLOAT && !VECTOR
         p.payload := onCtrl.loadData.RESULT.resized
         if(Riscv.RVD) when(SIZE === 2) {
           p.payload(63 downto 32).setAll()
         }
       }
 
-      // vecwb.foreach{v =>                // Handling writeback for vector extension
-      //   v.valid := SEL && !FLOAT && VECTOR
-      //   v.payload := B(0, 128 bits)
+      vecwb.foreach{v =>                // Handling writeback for vector extension
+        v.valid := False
+        v.payload := B(0, VLEN.get bits)
 
-      //   when(vecOffset === 0 && SEL && !FLOAT && VECTOR) {         // VecOffset = 0: writeback to reg[rd][63:0]
-      //     vecWriteBackBuffer.low := onCtrl.loadData.RESULT.resized
-      //     v.payload(63 downto 0) := onCtrl.loadData.RESULT.resized
-      //     v.payload(127 downto 64) := vecWriteBackBuffer.high
-      //   }.elsewhen(vecOffset === 1 && SEL && !FLOAT && VECTOR) {   // VecOffset = 1: writeback to reg[rd][127:64]
-      //     vecWriteBackBuffer.high := onCtrl.loadData.RESULT.resized
-      //     v.payload(63 downto 0) := vecWriteBackBuffer.low
-      //     v.payload(127 downto 64) := onCtrl.loadData.RESULT.resized
-      //   }
-      // }
+        when(SEL && !FLOAT && VECTOR) {
+          vecWbBuffer(vecOffset) := onCtrl.loadData.RESULT.resized
+          vecOffset := vecOffset + 1
+          when(vecOffset === vecWbCnt) {
+            if (VLEN.get == 128) {
+              v.payload(63 downto 0) := vecWbBuffer(0)
+              v.payload(127 downto 64) := onCtrl.loadData.RESULT.resized
+              v.valid := True
+            } else if (VLEN.get == 256) {
+              v.payload(63 downto 0) := vecWbBuffer(0)
+              v.payload(127 downto 64) := vecWbBuffer(1)
+              v.payload(191 downto 128) := vecWbBuffer(2)
+              v.payload(255 downto 192) := onCtrl.loadData.RESULT.resized
+              v.valid := True
+            } else if (VLEN.get == 512) {
+              v.payload(63 downto 0) := vecWbBuffer(0)
+              v.payload(127 downto 64) := vecWbBuffer(1)
+              v.payload(191 downto 128) := vecWbBuffer(2)
+              v.payload(255 downto 192) := vecWbBuffer(3)
+              v.payload(319 downto 256) := vecWbBuffer(4)
+              v.payload(383 downto 320) := vecWbBuffer(5)
+              v.payload(447 downto 384) := vecWbBuffer(6)
+              v.payload(511 downto 448) := onCtrl.loadData.RESULT.resized
+              v.valid := True
+            }
+          }
+        }
+      }
 
       val storeFire      = down.isFiring && AguPlugin.SEL && l1.STORE && !onPma.IO && !FROM_PREFETCH
       val storeBroadcast = down.isReady && l1.SEL && l1.STORE && !l1.ABORD && !l1.SKIP_WRITE && !l1.MISS && !l1.MISS_UNIQUE && !l1.HAZARD

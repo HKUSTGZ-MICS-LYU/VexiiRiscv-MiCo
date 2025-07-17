@@ -1079,6 +1079,7 @@ class ParamSimple() {
         preferedWritePortForInit = "lane0",
         syncRead = regFileSync,
         dualPortRam = regFileDualPortRam,
+        regBasedRam = regFileRegBasedRam,
         maskReadDuringWrite = false
       )
       plugins += new execute.vpu.VpuCsrPlugin()

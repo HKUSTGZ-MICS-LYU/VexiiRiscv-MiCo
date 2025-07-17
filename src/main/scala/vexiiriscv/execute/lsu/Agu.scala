@@ -58,7 +58,7 @@ class AguFrontend(
   writingRf ++= writeRfFloat
 
   val writeRfVector = ArrayBuffer[MicroOp]()
-  writeRfVector ++= List(VectorExt.VecLD)
+  if (RVV) writeRfVector ++= List(VectorExt.VecLD)
   writingRf ++= writeRfVector
   for (op <- writingRf) add(op).srcs(sk.Op.ADD, sk.SRC1.RF, sk.SRC2.I).decode(dec(LOAD -> True, FLOAT -> Bool(writeRfFloat.contains(op)), VECTOR -> Bool(writeRfVector.contains(op))))
 
