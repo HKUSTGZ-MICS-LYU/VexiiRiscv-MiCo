@@ -1,5 +1,5 @@
 sbt "runMain vexiiriscv.tester.TestBench \
-    --vlen=512 \
+    --vlen=128 \
     --with-rvv \
     --with-rvc \
     --with-rva \
@@ -10,4 +10,5 @@ sbt "runMain vexiiriscv.tester.TestBench \
     --div-radix 4 \
     --load-elf $1 \
     --no-rvls-check \
-    --print-stats"
+    --print-stats \
+    --trace-all"

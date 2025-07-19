@@ -10,7 +10,7 @@ import vexiiriscv.Global._
 import vexiiriscv.decode.Decode._
 import vexiiriscv.execute.fpu.FpuCsrPlugin
 import vexiiriscv.regfile.{RegFileWriter, RegFileWriterService, RegfileService}
-import vexiiriscv.riscv.{FloatRegFile, MicroOp, RD, RegfileSpec}
+import vexiiriscv.riscv.{FloatRegFile, VectorRegFile, MicroOp, RD, RegfileSpec}
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
@@ -94,7 +94,11 @@ class WriteBackPlugin(val lane : ExecuteLaneService,
     val write = new writeCtrl.Area {
       val port = rfp.newWrite(false, sharingKey = laneName)
       port.valid := isValid && isReady && !isCancel && up(rfa.ENABLE) && SEL && Global.COMMIT
-      port.address := HART_ID @@ rfa.PHYS
+      if (rf == VectorRegFile) {
+        port.address := HART_ID @@ rfa.PHYS(2 downto 0)
+      } else {
+        port.address := HART_ID @@ rfa.PHYS
+      }
       port.data := DATA
       port.hartId := HART_ID
       port.uopId := UOP_ID

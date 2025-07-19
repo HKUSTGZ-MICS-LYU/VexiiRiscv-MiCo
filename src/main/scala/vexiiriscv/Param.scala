@@ -1075,7 +1075,7 @@ class ParamSimple() {
     if (withRvv) {
       plugins += new regfile.RegFilePlugin(
         spec = riscv.VectorRegFile,
-        physicalDepth = 32,
+        physicalDepth = 8,
         preferedWritePortForInit = "lane0",
         syncRead = regFileSync,
         dualPortRam = regFileDualPortRam,
