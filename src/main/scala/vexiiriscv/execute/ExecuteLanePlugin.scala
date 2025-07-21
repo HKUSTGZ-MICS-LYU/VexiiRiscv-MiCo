@@ -12,7 +12,7 @@ import vexiiriscv.Global.{COMMIT, TRAP}
 import vexiiriscv.decode.Decode
 import vexiiriscv.misc.{InflightService, PipelineService, TrapService}
 import vexiiriscv.regfile.RegfileService
-import vexiiriscv.riscv.{IntRegFile, VectorRegFile, MicroOp, RD, RegfileSpec, RfAccess, RfRead, RfResource}
+import vexiiriscv.riscv.{IntRegFile, MicroOp, RD, RegfileSpec, RfAccess, RfRead, RfResource}
 import vexiiriscv.schedule.{Ages, DispatchPlugin, FlushCmd, ReschedulePlugin}
 
 import scala.collection.mutable
@@ -151,11 +151,8 @@ class ExecuteLanePlugin(override val laneName : String,
         val rfPlugin = host.find[RegfileService](_.rfSpec == spec.rf)
         val port = rfPlugin.newRead(false)
         port.valid := !eupp.isFreezed() // && readCtrl(rfa.ENABLE) && rfa.is(spec.rf, readCtrl(rfa.RFID))
-        if (spec.rf == VectorRegFile) {
-          port.address := readCtrl(rfa.PHYS)(2 downto 0)
-        } else {
-          port.address := readCtrl(rfa.PHYS)
-        }
+        port.address := readCtrl(rfa.PHYS)(log2Up(spec.rf.sizeArch) - 1 downto 0)
+
         // Generate a bypass specification for the regfile readed data
         case class BypassSpec(eu: ExecuteLaneService, nodeId: Int, payload: Payload[Bits])
         val bypassSpecs = mutable.LinkedHashSet[BypassSpec]()

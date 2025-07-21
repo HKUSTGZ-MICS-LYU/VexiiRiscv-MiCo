@@ -62,7 +62,7 @@ object VpuDotCompute extends AreaObject {
     }
 }
 
-class VpuDotPlugin(val layer: LaneLayer)
+class VpuDotPlugin(val layer: LaneLayer, val formatAt: Int = 1)
     extends ExecutionUnitElementSimple(layer) {
     val logic = during setup new Logic {
         awaitBuild()
@@ -75,6 +75,7 @@ class VpuDotPlugin(val layer: LaneLayer)
         val wbp = host.find[IntFormatPlugin](p => p.lane == layer.lane)
         val wb = wbp.access(0)
         val INC = Payload(UInt(7 bits))
+        val RES = Payload(Bits(Riscv.XLEN.get bits))
         add(VectorExt.VecDOT).decode(SEL -> True)
 
         val spec = layer(VectorExt.VecDOT)
@@ -126,9 +127,13 @@ class VpuDotPlugin(val layer: LaneLayer)
             )
 
             rd := result.asBits
-            
+            RES := rd
+        }
+
+        val format = new el.Execute(id = formatAt) {
+            //Provide the computation value for the writeback
             wb.valid := isValid && SEL
-            wb.payload := rd
+            wb.payload := RES
         }
     }
 }
