@@ -80,7 +80,7 @@ object MiCoCompute extends AreaObject {
     // }
 }
 
-object MiCoPlugin {
+object MiCoPlugin extends AreaObject{
     // 8 * 8-bit vector DotP 8  * 8-bit vector
     val DOTP8x8   = IntRegFile.TypeR(M"0000001----------100-----0001011")
     val DOTP8x4   = IntRegFile.TypeR(M"0000001----------101-----0001011")
@@ -99,28 +99,33 @@ object MiCoPlugin {
     // 32 * 1-bit vector DotP 32 * 1-bit vector
     val DOTP1x1   = IntRegFile.TypeR(M"0001000----------111-----0001011")
 
-    val xlen = Riscv.XLEN.get
-    val xlenLog2 = log2Up(xlen)
-
     val AQ = Payload(QType())  // 1 2 4 8
     val WQ = Payload(QType())  // 1 2 4 8
-
-    val INC = Payload(UInt(xlenLog2 bits)) // Increment Bits (0, 4, 8, 16, 32)
 }
 
-class MiCoPlugin(val layer : LaneLayer) 
-    extends ExecutionUnitElementSimple(layer)  {
-
+class MiCoPlugin(val layer : LaneLayer,
+                var extractAt : Int = 0,
+                var computeAt : Int = 1,
+                var formatAt : Int = 1) extends ExecutionUnitElementSimple(layer) {
+    
+    import MiCoPlugin._
+    import MiCoCompute._
+    import QType._
+    
     val logic = during setup new Logic {
         awaitBuild()
+        import SrcKeys._
+
+        val xlen = Riscv.XLEN.get
+        val xlenLog2 = log2Up(xlen)
+
+        val OPA = Payload(Bits(xlen bits)) // Operand A (RS1)
+        val INC = Payload(UInt(xlenLog2 bits)) // Increment Bits (0, 4, 8, 16, 32)
+        val RES = Payload(Bits(xlen bits)) // Result of the Dot Product
+        val ToDOTP8, ToDOTP4, ToDOTP2, ToDOTP1 = Payload(Bits(xlen bits))
 
         //Let's get the hardware interface that we will use to provide the result of our custom instruction
-        val wb = newWriteback(ifp, 0)
-        
-        import MiCoPlugin._
-        import MiCoCompute._
-        import QType._
-        import SrcKeys._
+        val wb = newWriteback(ifp, formatAt)
 
         // 8-bit Engine Data Path
         add(DOTP8x8).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q8, INC -> U(0, xlenLog2 bits))
@@ -144,13 +149,11 @@ class MiCoPlugin(val layer : LaneLayer)
         //This will allow a few other plugins to continue their elaboration (ex : decoder, dispatcher, ...)
         uopRetainer.release()
 
-        //Let's define some logic in the execute lane [0]
-        val process = new el.Execute(id = 0) {
+        val extract = new el.Execute(extractAt) {
             //Get the RISC-V RS1/RS2 values from the register file
             val rs1 = el(IntRegFile, RS1).asBits  // rs1 holds the 1st vector
             val rs2 = el(IntRegFile, RS2).asBits  // rs2 holds the 2nd vector
 
-            val rd = Bits(xlen bits)
             val offset = Reg(UInt(xlenLog2 bits)) init(0)
 
             when(isValid && SEL){
@@ -161,38 +164,48 @@ class MiCoPlugin(val layer : LaneLayer)
             val rs2d4 = rs2(offset, xlen/4 bits)
             val rs2d8 = rs2(offset, xlen/8 bits)
 
-            val ToDOTP8 = WQ.mux(
+            ToDOTP8 := WQ.mux(
                 Q8 -> rs2,
                 Q4 -> ExtendTo8b(rs2d2, bitWidth = 4),
                 Q2 -> ExtendTo8b(Extend2bTo4b(rs2d4), bitWidth = 4),
                 Q1 -> ExtendTo8b(Extend1bTo2b(rs2d8), bitWidth = 2)
             )
-            val ToDOTP4 = WQ.mux(
+            ToDOTP4 := WQ.mux(
                 Q4 -> rs2,
                 Q2 -> Extend2bTo4b(rs2d2),
                 Q1 -> Extend2bTo4b(Extend1bTo2b(rs2d4)),
                 default -> B(0, xlen bits) // Invalid
             )
-            val ToDOTP2 = WQ.mux(
+            ToDOTP2 := WQ.mux(
                 Q2 -> rs2,
                 Q1 -> Extend1bTo2b(rs2d2),
                 default -> B(0, xlen bits) // Invalid
             )
-            val ToDOTP1 = WQ.mux(
+            ToDOTP1 := WQ.mux(
                 Q1 -> rs2,
                 default -> B(0, xlen bits) // Invalid
             )
 
+            OPA := rs1
+        }
+
+        // Staging extract / compute will create 5 * 32/64-bit registers
+        // But it can greatly solve the timing issues
+
+        val compute = new el.Execute(computeAt){
             val result = AQ.mux(
-                Q8 -> DotProduct(rs1, ToDOTP8, bitWidth = 8),
-                Q4 -> DotProduct(rs1, ToDOTP4, bitWidth = 4),
-                Q2 -> DotProductSym2Bit(rs1, ToDOTP2),
-                Q1 -> DotProductSym1Bit(rs1, ToDOTP1)
+                Q8 -> DotProduct(OPA, ToDOTP8, bitWidth = 8),
+                Q4 -> DotProduct(OPA, ToDOTP4, bitWidth = 4),
+                Q2 -> DotProductSym2Bit(OPA, ToDOTP2),
+                Q1 -> DotProductSym1Bit(OPA, ToDOTP1)
             )
-            rd := result.asBits
+            RES := result.asBits
+        }
+
+        val format = new el.Execute(id = formatAt) {
             //Provide the computation value for the writeback
             wb.valid := SEL
-            wb.payload := rd
+            wb.payload := RES
         }
     }
 }
