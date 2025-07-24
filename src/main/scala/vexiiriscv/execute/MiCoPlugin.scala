@@ -216,7 +216,7 @@ class MiCoPlugin(val layer : LaneLayer,
             val result = AQ.mux(
                 Q8 -> DotProduct(OPA, ToDOTP8, bitWidth = 8),
                 Q4 -> DotProduct(OPA, ToDOTP4, bitWidth = 4),
-                Q2 -> DotProductSym2Bit(OPA, ToDOTP2),
+                Q2 -> DotProduct(OPA, ToDOTP2, bitWidth = 2),
                 Q1 -> DotProductSym1Bit(OPA, ToDOTP1)
             )
             RES := result.asBits
@@ -230,11 +230,11 @@ class MiCoPlugin(val layer : LaneLayer,
     }
 }
 
-class MiCoPluginLegacy(val layer : LaneLayer,
+class MiCoPluginV2(val layer : LaneLayer,
                 var extractAt : Int = 0,
                 var prodAt : Int = 1,
-                var sumAt : Int = 2,
-                var formatAt : Int = 2) extends ExecutionUnitElementSimple(layer) {
+                var sumAt : Int = 1,
+                var formatAt : Int = 1) extends ExecutionUnitElementSimple(layer) {
     
     import MiCoPlugin._
     import MiCoCompute._
