@@ -1,0 +1,97 @@
+Copyright 1986-2021 Xilinx, Inc. All Rights Reserved.
+------------------------------------------------------------------------------------
+| Tool Version : Vivado v.2021.2 (lin64) Build 3367213 Tue Oct 19 02:47:39 MDT 2021
+| Date         : Thu Jul 24 15:48:20 2025
+| Host         : ComradePenguinLaptop running 64-bit unknown
+| Command      : report_drc -file rpt/drc.rpt
+| Design       : MicroSoc
+| Device       : xcau25p-sfvb784-1-i
+| Speed File   : -1
+| Design State : Fully Routed
+------------------------------------------------------------------------------------
+
+Report DRC
+
+Table of Contents
+-----------------
+1. REPORT SUMMARY
+2. REPORT DETAILS
+
+1. REPORT SUMMARY
+-----------------
+            Netlist: MicroSoc
+          Floorplan: design_1
+      Design limits: <entire design considered>
+           Ruledeck: default
+             Max violations: <unlimited>
+             Violations found: 10
++--------+------------------+----------------------------+------------+
+| Rule   | Severity         | Description                | Violations |
++--------+------------------+----------------------------+------------+
+| NSTD-1 | Critical Warning | Unspecified I/O Standard   | 1          |
+| UCIO-1 | Critical Warning | Unconstrained Logical Port | 1          |
+| DPIP-2 | Warning          | Input pipelining           | 4          |
+| DPOP-4 | Warning          | MREG Output pipelining     | 4          |
++--------+------------------+----------------------------+------------+
+
+2. REPORT DETAILS
+-----------------
+NSTD-1#1 Critical Warning
+Unspecified I/O Standard  
+8 out of 8 logical ports use I/O standard (IOSTANDARD) value 'DEFAULT', instead of a user assigned specific value. This may cause I/O contention or incompatibility with the board power or connectivity affecting performance, signal integrity or in extreme cases cause damage to the device or the components to which it is connected. To correct this violation, specify all I/O standards. This design will fail to generate a bitstream unless all logical ports have a user specified I/O standard value defined. To allow bitstream creation with unspecified I/O standard values (not recommended), use this command: set_property SEVERITY {Warning} [get_drc_checks NSTD-1].  NOTE: When using the Vivado Runs infrastructure (e.g. launch_runs Tcl command), add this command to a .tcl file and add that file as a pre-hook for write_bitstream step for the implementation run. Problem ports: socCtrl_asyncReset, socCtrl_debugModule_tap_jtag_tck,
+socCtrl_debugModule_tap_jtag_tdi, socCtrl_debugModule_tap_jtag_tdo,
+socCtrl_debugModule_tap_jtag_tms, socCtrl_systemClk,
+system_peripheral_uart_logic_uart_rxd
+system_peripheral_uart_logic_uart_txd.
+Related violations: <none>
+
+UCIO-1#1 Critical Warning
+Unconstrained Logical Port  
+8 out of 8 logical ports have no user assigned specific location constraint (LOC). This may cause I/O contention or incompatibility with the board power or connectivity affecting performance, signal integrity or in extreme cases cause damage to the device or the components to which it is connected. To correct this violation, specify all pin locations. This design will fail to generate a bitstream unless all logical ports have a user specified site LOC constraint defined.  To allow bitstream creation with unspecified pin locations (not recommended), use this command: set_property SEVERITY {Warning} [get_drc_checks UCIO-1].  NOTE: When using the Vivado Runs infrastructure (e.g. launch_runs Tcl command), add this command to a .tcl file and add that file as a pre-hook for write_bitstream step for the implementation run.  Problem ports: socCtrl_asyncReset, socCtrl_debugModule_tap_jtag_tck,
+socCtrl_debugModule_tap_jtag_tdi, socCtrl_debugModule_tap_jtag_tdo,
+socCtrl_debugModule_tap_jtag_tms, socCtrl_systemClk,
+system_peripheral_uart_logic_uart_rxd
+system_peripheral_uart_logic_uart_txd.
+Related violations: <none>
+
+DPIP-2#1 Warning
+Input pipelining  
+DSP system_cpu_logic_core/execute_ctrl3_up_early0_MulPlugin_logic_mul_VALUES_1_lane0_reg input system_cpu_logic_core/execute_ctrl3_up_early0_MulPlugin_logic_mul_VALUES_1_lane0_reg/B[17:0] is not pipelined. Pipelining DSP48 input will improve performance.
+Related violations: <none>
+
+DPIP-2#2 Warning
+Input pipelining  
+DSP system_cpu_logic_core/execute_ctrl3_up_early0_MulPlugin_logic_mul_VALUES_2_lane0_reg input system_cpu_logic_core/execute_ctrl3_up_early0_MulPlugin_logic_mul_VALUES_2_lane0_reg/B[17:0] is not pipelined. Pipelining DSP48 input will improve performance.
+Related violations: <none>
+
+DPIP-2#3 Warning
+Input pipelining  
+DSP system_cpu_logic_core/execute_ctrl3_up_early0_MulPlugin_logic_mul_VALUES_3_lane0_reg input system_cpu_logic_core/execute_ctrl3_up_early0_MulPlugin_logic_mul_VALUES_3_lane0_reg/A[29:0] is not pipelined. Pipelining DSP48 input will improve performance.
+Related violations: <none>
+
+DPIP-2#4 Warning
+Input pipelining  
+DSP system_cpu_logic_core/execute_ctrl3_up_early0_MulPlugin_logic_mul_VALUES_3_lane0_reg input system_cpu_logic_core/execute_ctrl3_up_early0_MulPlugin_logic_mul_VALUES_3_lane0_reg/B[17:0] is not pipelined. Pipelining DSP48 input will improve performance.
+Related violations: <none>
+
+DPOP-4#1 Warning
+MREG Output pipelining  
+DSP system_cpu_logic_core/execute_ctrl3_up_early0_MulPlugin_logic_mul_VALUES_0_lane0_reg multiplier stage system_cpu_logic_core/execute_ctrl3_up_early0_MulPlugin_logic_mul_VALUES_0_lane0_reg/P[47:0] is not pipelined (MREG=0). Pipelining the multiplier function will improve performance and will save significant power so it is suggested whenever possible to fully pipeline this function.  If this multiplier was inferred, it is suggested to describe an additional register stage after this function.  If there is no registered adder/accumulator following the multiply function, two pipeline stages are suggested to allow both the MREG and PREG registers to be used.  If the DSP48 was instantiated in the design, it is suggested to set both the MREG and PREG attributes to 1 when performing multiply functions.
+Related violations: <none>
+
+DPOP-4#2 Warning
+MREG Output pipelining  
+DSP system_cpu_logic_core/execute_ctrl3_up_early0_MulPlugin_logic_mul_VALUES_1_lane0_reg multiplier stage system_cpu_logic_core/execute_ctrl3_up_early0_MulPlugin_logic_mul_VALUES_1_lane0_reg/P[47:0] is not pipelined (MREG=0). Pipelining the multiplier function will improve performance and will save significant power so it is suggested whenever possible to fully pipeline this function.  If this multiplier was inferred, it is suggested to describe an additional register stage after this function.  If there is no registered adder/accumulator following the multiply function, two pipeline stages are suggested to allow both the MREG and PREG registers to be used.  If the DSP48 was instantiated in the design, it is suggested to set both the MREG and PREG attributes to 1 when performing multiply functions.
+Related violations: <none>
+
+DPOP-4#3 Warning
+MREG Output pipelining  
+DSP system_cpu_logic_core/execute_ctrl3_up_early0_MulPlugin_logic_mul_VALUES_2_lane0_reg multiplier stage system_cpu_logic_core/execute_ctrl3_up_early0_MulPlugin_logic_mul_VALUES_2_lane0_reg/P[47:0] is not pipelined (MREG=0). Pipelining the multiplier function will improve performance and will save significant power so it is suggested whenever possible to fully pipeline this function.  If this multiplier was inferred, it is suggested to describe an additional register stage after this function.  If there is no registered adder/accumulator following the multiply function, two pipeline stages are suggested to allow both the MREG and PREG registers to be used.  If the DSP48 was instantiated in the design, it is suggested to set both the MREG and PREG attributes to 1 when performing multiply functions.
+Related violations: <none>
+
+DPOP-4#4 Warning
+MREG Output pipelining  
+DSP system_cpu_logic_core/execute_ctrl3_up_early0_MulPlugin_logic_mul_VALUES_3_lane0_reg multiplier stage system_cpu_logic_core/execute_ctrl3_up_early0_MulPlugin_logic_mul_VALUES_3_lane0_reg/P[47:0] is not pipelined (MREG=0). Pipelining the multiplier function will improve performance and will save significant power so it is suggested whenever possible to fully pipeline this function.  If this multiplier was inferred, it is suggested to describe an additional register stage after this function.  If there is no registered adder/accumulator following the multiply function, two pipeline stages are suggested to allow both the MREG and PREG registers to be used.  If the DSP48 was instantiated in the design, it is suggested to set both the MREG and PREG attributes to 1 when performing multiply functions.
+Related violations: <none>
+
+

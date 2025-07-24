@@ -835,7 +835,7 @@ class ParamSimple() {
     plugins += lane0
     plugins += new SrcPlugin(early0, executeAt = 0, relaxedRs = relaxedSrc)
     plugins += new IntAluPlugin(early0, formatAt = 0)
-    plugins += new MiCoPlugin(early0)
+    // plugins += new MiCoPlugin(early0)
     plugins += shifter(early0, formatAt = relaxedShift.toInt)
     plugins += new IntFormatPlugin(lane0)
     plugins += new BranchPlugin(layer=early0, aluAt=0, jumpAt=relaxedBranch.toInt, wbAt=0)
@@ -1075,7 +1075,7 @@ class ParamSimple() {
     if (withRvv) {
       plugins += new regfile.RegFilePlugin(
         spec = riscv.VectorRegFile,
-        physicalDepth = 8,
+        physicalDepth = 2,
         preferedWritePortForInit = "lane0",
         syncRead = regFileSync,
         dualPortRam = regFileDualPortRam,

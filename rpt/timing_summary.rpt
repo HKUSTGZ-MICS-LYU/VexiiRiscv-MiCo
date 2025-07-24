@@ -1,0 +1,533 @@
+Copyright 1986-2021 Xilinx, Inc. All Rights Reserved.
+-----------------------------------------------------------------------------------------
+| Tool Version      : Vivado v.2021.2 (lin64) Build 3367213 Tue Oct 19 02:47:39 MDT 2021
+| Date              : Thu Jul 24 15:48:15 2025
+| Host              : ComradePenguinLaptop running 64-bit unknown
+| Command           : report_timing_summary -file rpt/timing_summary.rpt
+| Design            : MicroSoc
+| Device            : xcau25p-sfvb784
+| Speed File        : -1  PRODUCTION 1.28 02-27-2020
+| Temperature Grade : I
+-----------------------------------------------------------------------------------------
+
+Timing Summary Report
+
+------------------------------------------------------------------------------------------------
+| Timer Settings
+| --------------
+------------------------------------------------------------------------------------------------
+
+  Enable Multi Corner Analysis               :  Yes
+  Enable Pessimism Removal                   :  Yes
+  Pessimism Removal Resolution               :  Nearest Common Node
+  Enable Input Delay Default Clock           :  No
+  Enable Preset / Clear Arcs                 :  No
+  Disable Flight Delays                      :  No
+  Ignore I/O Paths                           :  No
+  Timing Early Launch at Borrowing Latches   :  No
+  Borrow Time for Max Delay Exceptions       :  Yes
+  Merge Timing Exceptions                    :  Yes
+
+  Corner  Analyze    Analyze    
+  Name    Max Paths  Min Paths  
+  ------  ---------  ---------  
+  Slow    Yes        Yes        
+  Fast    Yes        Yes        
+
+
+------------------------------------------------------------------------------------------------
+| Report Methodology
+| ------------------
+------------------------------------------------------------------------------------------------
+
+No report available as report_methodology has not been run prior. Run report_methodology on the current design for the summary of methodology violations.
+
+
+
+check_timing report
+
+Table of Contents
+-----------------
+1. checking no_clock (248)
+2. checking constant_clock (0)
+3. checking pulse_width_clock (0)
+4. checking unconstrained_internal_endpoints (558)
+5. checking no_input_delay (4)
+6. checking no_output_delay (2)
+7. checking multiple_clock (0)
+8. checking generated_clocks (0)
+9. checking loops (0)
+10. checking partial_input_delay (0)
+11. checking partial_output_delay (0)
+12. checking latch_loops (0)
+
+1. checking no_clock (248)
+--------------------------
+ There are 248 register/latch pins with no clock driven by root clock pin: socCtrl_debugModule_tap_jtag_tck (HIGH)
+
+
+2. checking constant_clock (0)
+------------------------------
+ There are 0 register/latch pins with constant_clock.
+
+
+3. checking pulse_width_clock (0)
+---------------------------------
+ There are 0 register/latch pins which need pulse_width check
+
+
+4. checking unconstrained_internal_endpoints (558)
+--------------------------------------------------
+ There are 558 pins that are not constrained for maximum delay. (HIGH)
+
+ There are 0 pins that are not constrained for maximum delay due to constant clock.
+
+
+5. checking no_input_delay (4)
+------------------------------
+ There are 4 input ports with no input delay specified. (HIGH)
+
+ There are 0 input ports with no input delay but user has a false path constraint.
+
+
+6. checking no_output_delay (2)
+-------------------------------
+ There are 2 ports with no output delay specified. (HIGH)
+
+ There are 0 ports with no output delay but user has a false path constraint
+
+ There are 0 ports with no output delay but with a timing clock defined on it or propagating through it
+
+
+7. checking multiple_clock (0)
+------------------------------
+ There are 0 register/latch pins with multiple clocks.
+
+
+8. checking generated_clocks (0)
+--------------------------------
+ There are 0 generated clocks that are not connected to a clock source.
+
+
+9. checking loops (0)
+---------------------
+ There are 0 combinational loops in the design.
+
+
+10. checking partial_input_delay (0)
+------------------------------------
+ There are 0 input ports with partial input delay specified.
+
+
+11. checking partial_output_delay (0)
+-------------------------------------
+ There are 0 ports with partial output delay specified.
+
+
+12. checking latch_loops (0)
+----------------------------
+ There are 0 combinational latch loops in the design through latch input
+
+
+
+------------------------------------------------------------------------------------------------
+| Design Timing Summary
+| ---------------------
+------------------------------------------------------------------------------------------------
+
+    WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints      WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints     WPWS(ns)     TPWS(ns)  TPWS Failing Endpoints  TPWS Total Endpoints  
+    -------      -------  ---------------------  -------------------      -------      -------  ---------------------  -------------------     --------     --------  ----------------------  --------------------  
+      0.000        0.000                      0                14399        0.011        0.000                      0                14399        3.291        0.000                       0                  6329  
+
+
+All user specified timing constraints are met.
+
+
+------------------------------------------------------------------------------------------------
+| Clock Summary
+| -------------
+------------------------------------------------------------------------------------------------
+
+Clock              Waveform(ns)         Period(ns)      Frequency(MHz)
+-----              ------------         ----------      --------------
+socCtrl_systemClk  {0.000 3.864}        7.728           129.400         
+
+
+------------------------------------------------------------------------------------------------
+| Intra Clock Table
+| -----------------
+------------------------------------------------------------------------------------------------
+
+Clock                  WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints      WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints     WPWS(ns)     TPWS(ns)  TPWS Failing Endpoints  TPWS Total Endpoints  
+-----                  -------      -------  ---------------------  -------------------      -------      -------  ---------------------  -------------------     --------     --------  ----------------------  --------------------  
+socCtrl_systemClk        0.000        0.000                      0                13942        0.011        0.000                      0                13942        3.291        0.000                       0                  6329  
+
+
+------------------------------------------------------------------------------------------------
+| Inter Clock Table
+| -----------------
+------------------------------------------------------------------------------------------------
+
+From Clock    To Clock          WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints      WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints  
+----------    --------          -------      -------  ---------------------  -------------------      -------      -------  ---------------------  -------------------  
+
+
+------------------------------------------------------------------------------------------------
+| Other Path Groups Table
+| -----------------------
+------------------------------------------------------------------------------------------------
+
+Path Group         From Clock         To Clock               WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints      WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints  
+----------         ----------         --------               -------      -------  ---------------------  -------------------      -------      -------  ---------------------  -------------------  
+**async_default**  socCtrl_systemClk  socCtrl_systemClk        4.546        0.000                      0                  457        0.176        0.000                      0                  457  
+
+
+------------------------------------------------------------------------------------------------
+| Timing Details
+| --------------
+------------------------------------------------------------------------------------------------
+
+
+---------------------------------------------------------------------------------------------------
+From Clock:  socCtrl_systemClk
+  To Clock:  socCtrl_systemClk
+
+Setup :            0  Failing Endpoints,  Worst Slack        0.000ns,  Total Violation        0.000ns
+Hold  :            0  Failing Endpoints,  Worst Slack        0.011ns,  Total Violation        0.000ns
+PW    :            0  Failing Endpoints,  Worst Slack        3.291ns,  Total Violation        0.000ns
+---------------------------------------------------------------------------------------------------
+
+
+Max Delay Paths
+--------------------------------------------------------------------------------------
+Slack (MET) :             0.000ns  (required time - arrival time)
+  Source:                 system_cpu_logic_core/execute_ctrl1_up_Decode_UOP_lane0_reg[16]/C
+                            (rising edge-triggered cell FDRE clocked by socCtrl_systemClk  {rise@0.000ns fall@3.864ns period=7.728ns})
+  Destination:            system_cpu_logic_core/_zz_execute_ctrl3_down_early0_VpuDotPlugin_logic_RES_lane0_28[-1111111108]/D
+                            (rising edge-triggered cell FDRE clocked by socCtrl_systemClk  {rise@0.000ns fall@3.864ns period=7.728ns})
+  Path Group:             socCtrl_systemClk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            7.728ns  (socCtrl_systemClk rise@7.728ns - socCtrl_systemClk rise@0.000ns)
+  Data Path Delay:        7.537ns  (logic 1.008ns (13.374%)  route 6.529ns (86.626%))
+  Logic Levels:           7  (LUT2=1 LUT3=2 LUT5=3 LUT6=1)
+  Clock Path Skew:        -0.183ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    2.319ns = ( 10.047 - 7.728 ) 
+    Source Clock Delay      (SCD):    3.137ns
+    Clock Pessimism Removal (CPR):    0.636ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+  Clock Net Delay (Source):      1.880ns (routing 0.750ns, distribution 1.130ns)
+  Clock Net Delay (Destination): 1.625ns (routing 0.683ns, distribution 0.942ns)
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock socCtrl_systemClk rise edge)
+                                                      0.000     0.000 r  
+    D16                                               0.000     0.000 r  socCtrl_systemClk (IN)
+                         net (fo=0)                   0.000     0.000    socCtrl_systemClk_IBUF_inst/I
+    D16                  INBUF (Prop_INBUF_HDIOB_M_PAD_O)
+                                                      1.018     1.018 r  socCtrl_systemClk_IBUF_inst/INBUF_INST/O
+                         net (fo=1, routed)           0.000     1.018    socCtrl_systemClk_IBUF_inst/OUT
+    D16                  IBUFCTRL (Prop_IBUFCTRL_HDIOB_M_I_O)
+                                                      0.000     1.018 r  socCtrl_systemClk_IBUF_inst/IBUFCTRL_INST/O
+                         net (fo=1, routed)           0.211     1.229    socCtrl_systemClk_IBUF
+    BUFGCE_HDIO_X0Y6     BUFGCE (Prop_BUFCE_BUFGCE_HDIO_I_O)
+                                                      0.028     1.257 r  socCtrl_systemClk_IBUF_BUFG_inst/O
+    X1Y2 (CLOCK_ROOT)    net (fo=6348, routed)        1.880     3.137    system_cpu_logic_core/socCtrl_systemClk_IBUF_BUFG
+    SLICE_X38Y95         FDRE                                         r  system_cpu_logic_core/execute_ctrl1_up_Decode_UOP_lane0_reg[16]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X38Y95         FDRE (Prop_EFF_SLICEL_C_Q)
+                                                      0.096     3.233 r  system_cpu_logic_core/execute_ctrl1_up_Decode_UOP_lane0_reg[16]/Q
+                         net (fo=13, routed)          0.192     3.425    system_cpu_logic_core/execute_ctrl1_up_Decode_UOP_lane0_reg_n_0_[16]
+    SLICE_X38Y96         LUT6 (Prop_H6LUT_SLICEL_I4_O)
+                                                      0.179     3.604 f  system_cpu_logic_core/_zz_execute_ctrl3_down_early0_VpuDotPlugin_logic_RES_lane0_14[-1111111109]_i_20/O
+                         net (fo=1, routed)           0.162     3.766    system_cpu_logic_core/_zz_execute_ctrl3_down_early0_VpuDotPlugin_logic_RES_lane0_14[-1111111109]_i_20_n_0
+    SLICE_X38Y97         LUT5 (Prop_H6LUT_SLICEL_I2_O)
+                                                      0.116     3.882 f  system_cpu_logic_core/_zz_execute_ctrl3_down_early0_VpuDotPlugin_logic_RES_lane0_14[-1111111109]_i_8/O
+                         net (fo=2, routed)           0.224     4.106    system_cpu_logic_core/execute_lane0_bypasser_integer_RS1_bypassEnables_bools_4218_out
+    SLICE_X38Y98         LUT5 (Prop_D5LUT_SLICEL_I2_O)
+                                                      0.118     4.224 f  system_cpu_logic_core/_zz_execute_ctrl1_down_integer_RS1_lane0_1_inferred_i_106/O
+                         net (fo=130, routed)         1.869     6.093    system_cpu_logic_core/execute_lane0_bypasser_integer_RS1_bypassEnables_bools_2
+    SLICE_X53Y177        LUT2 (Prop_D6LUT_SLICEM_I0_O)
+                                                      0.147     6.240 f  system_cpu_logic_core/_zz_execute_ctrl1_down_integer_RS1_lane0_1_inferred_i_101/O
+                         net (fo=161, routed)         1.454     7.694    system_cpu_logic_core/_zz_execute_ctrl1_down_integer_RS1_lane0_1_inferred_i_101_n_0
+    SLICE_X42Y127        LUT3 (Prop_H5LUT_SLICEM_I0_O)
+                                                      0.167     7.861 f  system_cpu_logic_core/_zz_execute_ctrl3_down_early0_VpuDotPlugin_logic_RES_lane0_14[-1111111109]_i_6/O
+                         net (fo=133, routed)         1.139     9.000    system_cpu_logic_core/execute_lane0_bypasser_vector_RS1_bypassEnables_range_0_to_3
+    SLICE_X52Y174        LUT3 (Prop_D6LUT_SLICEM_I1_O)
+                                                      0.038     9.038 r  system_cpu_logic_core/_zz_execute_ctrl3_down_early0_VpuDotPlugin_logic_RES_lane0_14[-1111111109]_i_2/O
+                         net (fo=128, routed)         1.431    10.469    system_cpu_logic_core/vector_RegFilePlugin_logic_regfile_fpga/execute_ctrl1_down_vector_RS1_lane05169_out
+    SLICE_X38Y138        LUT5 (Prop_D6LUT_SLICEL_I0_O)
+                                                      0.147    10.616 r  system_cpu_logic_core/vector_RegFilePlugin_logic_regfile_fpga/_zz_execute_ctrl3_down_early0_VpuDotPlugin_logic_RES_lane0_28[-1111111108]_i_1/O
+                         net (fo=1, routed)           0.058    10.674    system_cpu_logic_core/execute_ctrl1_down_vector_RS1_lane0[119]
+    SLICE_X38Y138        FDRE                                         r  system_cpu_logic_core/_zz_execute_ctrl3_down_early0_VpuDotPlugin_logic_RES_lane0_28[-1111111108]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock socCtrl_systemClk rise edge)
+                                                      7.728     7.728 r  
+    D16                                               0.000     7.728 r  socCtrl_systemClk (IN)
+                         net (fo=0)                   0.000     7.728    socCtrl_systemClk_IBUF_inst/I
+    D16                  INBUF (Prop_INBUF_HDIOB_M_PAD_O)
+                                                      0.495     8.223 r  socCtrl_systemClk_IBUF_inst/INBUF_INST/O
+                         net (fo=1, routed)           0.000     8.223    socCtrl_systemClk_IBUF_inst/OUT
+    D16                  IBUFCTRL (Prop_IBUFCTRL_HDIOB_M_I_O)
+                                                      0.000     8.223 r  socCtrl_systemClk_IBUF_inst/IBUFCTRL_INST/O
+                         net (fo=1, routed)           0.175     8.398    socCtrl_systemClk_IBUF
+    BUFGCE_HDIO_X0Y6     BUFGCE (Prop_BUFCE_BUFGCE_HDIO_I_O)
+                                                      0.024     8.422 r  socCtrl_systemClk_IBUF_BUFG_inst/O
+    X1Y2 (CLOCK_ROOT)    net (fo=6348, routed)        1.625    10.047    system_cpu_logic_core/socCtrl_systemClk_IBUF_BUFG
+    SLICE_X38Y138        FDRE                                         r  system_cpu_logic_core/_zz_execute_ctrl3_down_early0_VpuDotPlugin_logic_RES_lane0_28[-1111111108]/C
+                         clock pessimism              0.636    10.682    
+                         clock uncertainty           -0.035    10.647    
+    SLICE_X38Y138        FDRE (Setup_DFF_SLICEL_C_D)
+                                                      0.027    10.674    system_cpu_logic_core/_zz_execute_ctrl3_down_early0_VpuDotPlugin_logic_RES_lane0_28[-1111111108]
+  -------------------------------------------------------------------
+                         required time                         10.674    
+                         arrival time                         -10.674    
+  -------------------------------------------------------------------
+                         slack                                  0.000    
+
+
+
+
+
+Min Delay Paths
+--------------------------------------------------------------------------------------
+Slack (MET) :             0.011ns  (arrival time - required time)
+  Source:                 system_cpu_logic_core/execute_ctrl6_up_lane0_vector_WriteBackPlugin_logic_DATA_lane0_reg[104]/C
+                            (rising edge-triggered cell FDRE clocked by socCtrl_systemClk  {rise@0.000ns fall@3.864ns period=7.728ns})
+  Destination:            system_cpu_logic_core/execute_ctrl7_up_lane0_vector_WriteBackPlugin_logic_DATA_lane0_reg[104]/D
+                            (rising edge-triggered cell FDRE clocked by socCtrl_systemClk  {rise@0.000ns fall@3.864ns period=7.728ns})
+  Path Group:             socCtrl_systemClk
+  Path Type:              Hold (Min at Slow Process Corner)
+  Requirement:            0.000ns  (socCtrl_systemClk rise@0.000ns - socCtrl_systemClk rise@0.000ns)
+  Data Path Delay:        0.160ns  (logic 0.070ns (43.750%)  route 0.090ns (56.250%))
+  Logic Levels:           0  
+  Clock Path Skew:        0.094ns (DCD - SCD - CPR)
+    Destination Clock Delay (DCD):    3.108ns
+    Source Clock Delay      (SCD):    2.330ns
+    Clock Pessimism Removal (CPR):    0.684ns
+  Clock Net Delay (Source):      1.636ns (routing 0.683ns, distribution 0.953ns)
+  Clock Net Delay (Destination): 1.851ns (routing 0.750ns, distribution 1.101ns)
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock socCtrl_systemClk rise edge)
+                                                      0.000     0.000 r  
+    D16                                               0.000     0.000 r  socCtrl_systemClk (IN)
+                         net (fo=0)                   0.000     0.000    socCtrl_systemClk_IBUF_inst/I
+    D16                  INBUF (Prop_INBUF_HDIOB_M_PAD_O)
+                                                      0.495     0.495 r  socCtrl_systemClk_IBUF_inst/INBUF_INST/O
+                         net (fo=1, routed)           0.000     0.495    socCtrl_systemClk_IBUF_inst/OUT
+    D16                  IBUFCTRL (Prop_IBUFCTRL_HDIOB_M_I_O)
+                                                      0.000     0.495 r  socCtrl_systemClk_IBUF_inst/IBUFCTRL_INST/O
+                         net (fo=1, routed)           0.175     0.670    socCtrl_systemClk_IBUF
+    BUFGCE_HDIO_X0Y6     BUFGCE (Prop_BUFCE_BUFGCE_HDIO_I_O)
+                                                      0.024     0.694 r  socCtrl_systemClk_IBUF_BUFG_inst/O
+    X1Y2 (CLOCK_ROOT)    net (fo=6348, routed)        1.636     2.330    system_cpu_logic_core/socCtrl_systemClk_IBUF_BUFG
+    SLICE_X41Y141        FDRE                                         r  system_cpu_logic_core/execute_ctrl6_up_lane0_vector_WriteBackPlugin_logic_DATA_lane0_reg[104]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X41Y141        FDRE (Prop_EFF_SLICEL_C_Q)
+                                                      0.070     2.400 r  system_cpu_logic_core/execute_ctrl6_up_lane0_vector_WriteBackPlugin_logic_DATA_lane0_reg[104]/Q
+                         net (fo=3, routed)           0.090     2.490    system_cpu_logic_core/execute_ctrl6_up_lane0_vector_WriteBackPlugin_logic_DATA_lane0[104]
+    SLICE_X42Y141        FDRE                                         r  system_cpu_logic_core/execute_ctrl7_up_lane0_vector_WriteBackPlugin_logic_DATA_lane0_reg[104]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock socCtrl_systemClk rise edge)
+                                                      0.000     0.000 r  
+    D16                                               0.000     0.000 r  socCtrl_systemClk (IN)
+                         net (fo=0)                   0.000     0.000    socCtrl_systemClk_IBUF_inst/I
+    D16                  INBUF (Prop_INBUF_HDIOB_M_PAD_O)
+                                                      1.018     1.018 r  socCtrl_systemClk_IBUF_inst/INBUF_INST/O
+                         net (fo=1, routed)           0.000     1.018    socCtrl_systemClk_IBUF_inst/OUT
+    D16                  IBUFCTRL (Prop_IBUFCTRL_HDIOB_M_I_O)
+                                                      0.000     1.018 r  socCtrl_systemClk_IBUF_inst/IBUFCTRL_INST/O
+                         net (fo=1, routed)           0.211     1.229    socCtrl_systemClk_IBUF
+    BUFGCE_HDIO_X0Y6     BUFGCE (Prop_BUFCE_BUFGCE_HDIO_I_O)
+                                                      0.028     1.257 r  socCtrl_systemClk_IBUF_BUFG_inst/O
+    X1Y2 (CLOCK_ROOT)    net (fo=6348, routed)        1.851     3.108    system_cpu_logic_core/socCtrl_systemClk_IBUF_BUFG
+    SLICE_X42Y141        FDRE                                         r  system_cpu_logic_core/execute_ctrl7_up_lane0_vector_WriteBackPlugin_logic_DATA_lane0_reg[104]/C
+                         clock pessimism             -0.684     2.424    
+    SLICE_X42Y141        FDRE (Hold_GFF2_SLICEM_C_D)
+                                                      0.055     2.479    system_cpu_logic_core/execute_ctrl7_up_lane0_vector_WriteBackPlugin_logic_DATA_lane0_reg[104]
+  -------------------------------------------------------------------
+                         required time                         -2.479    
+                         arrival time                           2.490    
+  -------------------------------------------------------------------
+                         slack                                  0.011    
+
+
+
+
+
+Pulse Width Checks
+--------------------------------------------------------------------------------------
+Clock Name:         socCtrl_systemClk
+Waveform(ns):       { 0.000 3.864 }
+Period(ns):         7.728
+Sources:            { socCtrl_systemClk }
+
+Check Type        Corner  Lib Pin             Reference Pin  Required(ns)  Actual(ns)  Slack(ns)  Location      Pin
+Min Period        n/a     RAMB18E2/CLKARDCLK  n/a            1.739         7.728       5.989      RAMB18_X3Y38  system_ram_thread_logic/mem_symbol0_reg_bram_0/CLKARDCLK
+Low Pulse Width   Slow    RAMD32/CLK          n/a            0.573         3.864       3.291      SLICE_X50Y83  socCtrl_debugModule_dm_thread_logic/logic_progbufX_mem_reg_0_1_0_13/RAMA/CLK
+High Pulse Width  Slow    RAMD32/CLK          n/a            0.573         3.864       3.291      SLICE_X50Y83  socCtrl_debugModule_dm_thread_logic/logic_progbufX_mem_reg_0_1_0_13/RAMA/CLK
+
+
+
+---------------------------------------------------------------------------------------------------
+Path Group:  **async_default**
+From Clock:  socCtrl_systemClk
+  To Clock:  socCtrl_systemClk
+
+Setup :            0  Failing Endpoints,  Worst Slack        4.546ns,  Total Violation        0.000ns
+Hold  :            0  Failing Endpoints,  Worst Slack        0.176ns,  Total Violation        0.000ns
+---------------------------------------------------------------------------------------------------
+
+
+Max Delay Paths
+--------------------------------------------------------------------------------------
+Slack (MET) :             4.546ns  (required time - arrival time)
+  Source:                 socCtrl_system_fiber_buffer/buffers_1_reg/C
+                            (rising edge-triggered cell FDPE clocked by socCtrl_systemClk  {rise@0.000ns fall@3.864ns period=7.728ns})
+  Destination:            system_cpu_logic_core/VpuCsrPlugin_api_vpuConfig_reg[2]_rep__1/CLR
+                            (recovery check against rising-edge clock socCtrl_systemClk  {rise@0.000ns fall@3.864ns period=7.728ns})
+  Path Group:             **async_default**
+  Path Type:              Recovery (Max at Slow Process Corner)
+  Requirement:            7.728ns  (socCtrl_systemClk rise@7.728ns - socCtrl_systemClk rise@0.000ns)
+  Data Path Delay:        2.895ns  (logic 0.097ns (3.351%)  route 2.798ns (96.649%))
+  Logic Levels:           0  
+  Clock Path Skew:        -0.180ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    2.350ns = ( 10.078 - 7.728 ) 
+    Source Clock Delay      (SCD):    3.165ns
+    Clock Pessimism Removal (CPR):    0.636ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+  Clock Net Delay (Source):      1.908ns (routing 0.750ns, distribution 1.158ns)
+  Clock Net Delay (Destination): 1.656ns (routing 0.683ns, distribution 0.973ns)
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock socCtrl_systemClk rise edge)
+                                                      0.000     0.000 r  
+    D16                                               0.000     0.000 r  socCtrl_systemClk (IN)
+                         net (fo=0)                   0.000     0.000    socCtrl_systemClk_IBUF_inst/I
+    D16                  INBUF (Prop_INBUF_HDIOB_M_PAD_O)
+                                                      1.018     1.018 r  socCtrl_systemClk_IBUF_inst/INBUF_INST/O
+                         net (fo=1, routed)           0.000     1.018    socCtrl_systemClk_IBUF_inst/OUT
+    D16                  IBUFCTRL (Prop_IBUFCTRL_HDIOB_M_I_O)
+                                                      0.000     1.018 r  socCtrl_systemClk_IBUF_inst/IBUFCTRL_INST/O
+                         net (fo=1, routed)           0.211     1.229    socCtrl_systemClk_IBUF
+    BUFGCE_HDIO_X0Y6     BUFGCE (Prop_BUFCE_BUFGCE_HDIO_I_O)
+                                                      0.028     1.257 r  socCtrl_systemClk_IBUF_BUFG_inst/O
+    X1Y2 (CLOCK_ROOT)    net (fo=6348, routed)        1.908     3.165    socCtrl_system_fiber_buffer/socCtrl_systemClk
+    SLICE_X52Y85         FDPE                                         r  socCtrl_system_fiber_buffer/buffers_1_reg/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X52Y85         FDPE (Prop_BFF2_SLICEM_C_Q)
+                                                      0.097     3.262 f  socCtrl_system_fiber_buffer/buffers_1_reg/Q
+                         net (fo=386, routed)         2.798     6.060    system_cpu_logic_core/busy_reg_inv
+    SLICE_X46Y147        FDCE                                         f  system_cpu_logic_core/VpuCsrPlugin_api_vpuConfig_reg[2]_rep__1/CLR
+  -------------------------------------------------------------------    -------------------
+
+                         (clock socCtrl_systemClk rise edge)
+                                                      7.728     7.728 r  
+    D16                                               0.000     7.728 r  socCtrl_systemClk (IN)
+                         net (fo=0)                   0.000     7.728    socCtrl_systemClk_IBUF_inst/I
+    D16                  INBUF (Prop_INBUF_HDIOB_M_PAD_O)
+                                                      0.495     8.223 r  socCtrl_systemClk_IBUF_inst/INBUF_INST/O
+                         net (fo=1, routed)           0.000     8.223    socCtrl_systemClk_IBUF_inst/OUT
+    D16                  IBUFCTRL (Prop_IBUFCTRL_HDIOB_M_I_O)
+                                                      0.000     8.223 r  socCtrl_systemClk_IBUF_inst/IBUFCTRL_INST/O
+                         net (fo=1, routed)           0.175     8.398    socCtrl_systemClk_IBUF
+    BUFGCE_HDIO_X0Y6     BUFGCE (Prop_BUFCE_BUFGCE_HDIO_I_O)
+                                                      0.024     8.422 r  socCtrl_systemClk_IBUF_BUFG_inst/O
+    X1Y2 (CLOCK_ROOT)    net (fo=6348, routed)        1.656    10.078    system_cpu_logic_core/socCtrl_systemClk_IBUF_BUFG
+    SLICE_X46Y147        FDCE                                         r  system_cpu_logic_core/VpuCsrPlugin_api_vpuConfig_reg[2]_rep__1/C
+                         clock pessimism              0.636    10.713    
+                         clock uncertainty           -0.035    10.678    
+    SLICE_X46Y147        FDCE (Recov_EFF_SLICEL_C_CLR)
+                                                     -0.072    10.606    system_cpu_logic_core/VpuCsrPlugin_api_vpuConfig_reg[2]_rep__1
+  -------------------------------------------------------------------
+                         required time                         10.606    
+                         arrival time                          -6.060    
+  -------------------------------------------------------------------
+                         slack                                  4.546    
+
+
+
+
+
+Min Delay Paths
+--------------------------------------------------------------------------------------
+Slack (MET) :             0.176ns  (arrival time - required time)
+  Source:                 socCtrl_debugModule_dm_thread_logic/dmactive_reg/C
+                            (rising edge-triggered cell FDCE clocked by socCtrl_systemClk  {rise@0.000ns fall@3.864ns period=7.728ns})
+  Destination:            socCtrl_debugModule_dm_thread_logic/logic_dmcontrol_hartSelHi_reg[1]/CLR
+                            (removal check against rising-edge clock socCtrl_systemClk  {rise@0.000ns fall@3.864ns period=7.728ns})
+  Path Group:             **async_default**
+  Path Type:              Removal (Min at Fast Process Corner)
+  Requirement:            0.000ns  (socCtrl_systemClk rise@0.000ns - socCtrl_systemClk rise@0.000ns)
+  Data Path Delay:        0.209ns  (logic 0.039ns (18.660%)  route 0.170ns (81.340%))
+  Logic Levels:           0  
+  Clock Path Skew:        0.053ns (DCD - SCD - CPR)
+    Destination Clock Delay (DCD):    1.839ns
+    Source Clock Delay      (SCD):    1.393ns
+    Clock Pessimism Removal (CPR):    0.393ns
+  Clock Net Delay (Source):      0.975ns (routing 0.385ns, distribution 0.590ns)
+  Clock Net Delay (Destination): 1.110ns (routing 0.431ns, distribution 0.679ns)
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock socCtrl_systemClk rise edge)
+                                                      0.000     0.000 r  
+    D16                                               0.000     0.000 r  socCtrl_systemClk (IN)
+                         net (fo=0)                   0.000     0.000    socCtrl_systemClk_IBUF_inst/I
+    D16                  INBUF (Prop_INBUF_HDIOB_M_PAD_O)
+                                                      0.310     0.310 r  socCtrl_systemClk_IBUF_inst/INBUF_INST/O
+                         net (fo=1, routed)           0.000     0.310    socCtrl_systemClk_IBUF_inst/OUT
+    D16                  IBUFCTRL (Prop_IBUFCTRL_HDIOB_M_I_O)
+                                                      0.000     0.310 r  socCtrl_systemClk_IBUF_inst/IBUFCTRL_INST/O
+                         net (fo=1, routed)           0.091     0.401    socCtrl_systemClk_IBUF
+    BUFGCE_HDIO_X0Y6     BUFGCE (Prop_BUFCE_BUFGCE_HDIO_I_O)
+                                                      0.017     0.418 r  socCtrl_systemClk_IBUF_BUFG_inst/O
+    X1Y2 (CLOCK_ROOT)    net (fo=6348, routed)        0.975     1.393    socCtrl_debugModule_dm_thread_logic/socCtrl_systemClk_IBUF_BUFG
+    SLICE_X51Y86         FDCE                                         r  socCtrl_debugModule_dm_thread_logic/dmactive_reg/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X51Y86         FDCE (Prop_HFF2_SLICEL_C_Q)
+                                                      0.039     1.432 r  socCtrl_debugModule_dm_thread_logic/dmactive_reg/Q
+                         net (fo=36, routed)          0.170     1.602    socCtrl_debugModule_dm_thread_logic/p_1_in[0]
+    SLICE_X53Y84         FDCE                                         f  socCtrl_debugModule_dm_thread_logic/logic_dmcontrol_hartSelHi_reg[1]/CLR  (IS_INVERTED)
+  -------------------------------------------------------------------    -------------------
+
+                         (clock socCtrl_systemClk rise edge)
+                                                      0.000     0.000 r  
+    D16                                               0.000     0.000 r  socCtrl_systemClk (IN)
+                         net (fo=0)                   0.000     0.000    socCtrl_systemClk_IBUF_inst/I
+    D16                  INBUF (Prop_INBUF_HDIOB_M_PAD_O)
+                                                      0.597     0.597 r  socCtrl_systemClk_IBUF_inst/INBUF_INST/O
+                         net (fo=1, routed)           0.000     0.597    socCtrl_systemClk_IBUF_inst/OUT
+    D16                  IBUFCTRL (Prop_IBUFCTRL_HDIOB_M_I_O)
+                                                      0.000     0.597 r  socCtrl_systemClk_IBUF_inst/IBUFCTRL_INST/O
+                         net (fo=1, routed)           0.113     0.710    socCtrl_systemClk_IBUF
+    BUFGCE_HDIO_X0Y6     BUFGCE (Prop_BUFCE_BUFGCE_HDIO_I_O)
+                                                      0.019     0.729 r  socCtrl_systemClk_IBUF_BUFG_inst/O
+    X1Y2 (CLOCK_ROOT)    net (fo=6348, routed)        1.110     1.839    socCtrl_debugModule_dm_thread_logic/socCtrl_systemClk_IBUF_BUFG
+    SLICE_X53Y84         FDCE                                         r  socCtrl_debugModule_dm_thread_logic/logic_dmcontrol_hartSelHi_reg[1]/C
+                         clock pessimism             -0.393     1.446    
+    SLICE_X53Y84         FDCE (Remov_AFF_SLICEM_C_CLR)
+                                                     -0.020     1.426    socCtrl_debugModule_dm_thread_logic/logic_dmcontrol_hartSelHi_reg[1]
+  -------------------------------------------------------------------
+                         required time                         -1.426    
+                         arrival time                           1.602    
+  -------------------------------------------------------------------
+                         slack                                  0.176    
+
+
+
+
+

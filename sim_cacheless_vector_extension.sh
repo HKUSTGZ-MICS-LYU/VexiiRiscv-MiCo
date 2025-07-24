@@ -2,7 +2,6 @@ sbt "runMain vexiiriscv.tester.TestBench \
     --vlen=128 \
     --with-rvv \
     --with-rvc \
-    --with-rva \
     --with-mul \
     --with-div \
     --with-late-alu \
@@ -10,5 +9,4 @@ sbt "runMain vexiiriscv.tester.TestBench \
     --div-radix 4 \
     --load-elf $1 \
     --no-rvls-check \
-    --print-stats \
-    --trace-all"
+    --print-stats"
