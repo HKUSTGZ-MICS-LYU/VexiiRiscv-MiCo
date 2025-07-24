@@ -17,6 +17,26 @@ object QType extends SpinalEnum(defaultEncoding=binaryOneHot){
 }
 
 object MiCoCompute extends AreaObject {
+
+    def Product(op_a : Bits, op_b : Bits, bitWidth : Int) : Vec[SInt] = {
+        val a_vec = op_a.subdivideIn(bitWidth bits)
+        val b_vec = op_b.subdivideIn(bitWidth bits)
+        Vec(a_vec.zip(b_vec).map{case (a_i, b_i) => a_i.asSInt * b_i.asSInt})
+    }
+
+    def ProductBin(op_a : Bits, op_b : Bits) : Vec[SInt] = {
+        // Binary Product
+        val a_vec = op_a.subdivideIn(1 bits)
+        val b_vec = op_b.subdivideIn(1 bits)
+        Vec(a_vec.zip(b_vec).map{case (a_i, b_i) => (a_i ^ b_i).muxList(
+            List((B"0", S(1, 2 bits)),
+                (B"1", S(-1, 2 bits))))})
+    }
+    
+    def AdderTree(vec: Vec[SInt]) : SInt = {
+        vec.reduceBalancedTree(_ +^ _).resize(Riscv.XLEN.get)
+    } 
+
     def DotProduct(op_a : Bits, op_b : Bits, bitWidth : Int) : SInt = {
         val a_vec = op_a.subdivideIn(bitWidth bits)
         val b_vec = op_b.subdivideIn(bitWidth bits)
@@ -200,6 +220,137 @@ class MiCoPlugin(val layer : LaneLayer,
                 Q1 -> DotProductSym1Bit(OPA, ToDOTP1)
             )
             RES := result.asBits
+        }
+
+        val format = new el.Execute(id = formatAt) {
+            //Provide the computation value for the writeback
+            wb.valid := SEL
+            wb.payload := RES
+        }
+    }
+}
+
+class MiCoPluginLegacy(val layer : LaneLayer,
+                var extractAt : Int = 0,
+                var prodAt : Int = 1,
+                var sumAt : Int = 2,
+                var formatAt : Int = 2) extends ExecutionUnitElementSimple(layer) {
+    
+    import MiCoPlugin._
+    import MiCoCompute._
+    import QType._
+    
+    val logic = during setup new Logic {
+        awaitBuild()
+        import SrcKeys._
+
+        val xlen = Riscv.XLEN.get
+        val xlenLog2 = log2Up(xlen)
+
+        val OPA = Payload(Bits(xlen bits)) // Operand A (RS1)
+        val INC = Payload(UInt(xlenLog2 bits)) // Increment Bits (0, 4, 8, 16, 32)
+        val RES = Payload(Bits(xlen bits)) // Result of the Dot Product
+        val ToDOTP8, ToDOTP4, ToDOTP2, ToDOTP1 = Payload(Bits(xlen bits))
+
+        //Let's get the hardware interface that we will use to provide the result of our custom instruction
+        val wb = newWriteback(ifp, formatAt)
+
+        // 8-bit Engine Data Path
+        add(DOTP8x8).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q8, INC -> U(0, xlenLog2 bits))
+        add(DOTP8x4).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q4, INC -> U(xlen/2, xlenLog2 bits))
+        add(DOTP8x2).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q2, INC -> U(xlen/4, xlenLog2 bits))
+        add(DOTP8x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q1, INC -> U(xlen/8, xlenLog2 bits))
+
+        // 4-bit Engine Data Path
+        add(DOTP4x4).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q4, WQ -> Q4, INC -> U(0, xlenLog2 bits))
+        add(DOTP4x2).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q4, WQ -> Q2, INC -> U(xlen/2, xlenLog2 bits))
+        add(DOTP4x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q4, WQ -> Q1, INC -> U(xlen/4, xlenLog2 bits))
+
+        // 2-bit Engine Data Path
+        add(DOTP2x2).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q2, WQ -> Q2, INC -> U(0, xlenLog2 bits))
+        add(DOTP2x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q2, WQ -> Q1, INC -> U(xlen/2, xlenLog2 bits))
+
+        // 1-bit Engine Data Path
+        add(DOTP1x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q1, WQ -> Q1, INC -> U(0, xlenLog2 bits))
+
+        //Now that we are done specifying everything about the instructions, we can release the Logic.uopRetainer
+        //This will allow a few other plugins to continue their elaboration (ex : decoder, dispatcher, ...)
+        uopRetainer.release()
+
+        val extract = new el.Execute(extractAt) {
+            //Get the RISC-V RS1/RS2 values from the register file
+            val rs1 = el(IntRegFile, RS1).asBits  // rs1 holds the 1st vector
+            val rs2 = el(IntRegFile, RS2).asBits  // rs2 holds the 2nd vector
+
+            val offset = Reg(UInt(xlenLog2 bits)) init(0)
+
+            when(isValid && SEL){
+                offset := offset + INC
+            }
+
+            val rs2d2 = rs2(offset, xlen/2 bits)
+            val rs2d4 = rs2(offset, xlen/4 bits)
+            val rs2d8 = rs2(offset, xlen/8 bits)
+
+            ToDOTP8 := WQ.mux(
+                Q8 -> rs2,
+                Q4 -> ExtendTo8b(rs2d2, bitWidth = 4),
+                Q2 -> ExtendTo8b(Extend2bTo4b(rs2d4), bitWidth = 4),
+                Q1 -> ExtendTo8b(Extend1bTo2b(rs2d8), bitWidth = 2)
+            )
+            ToDOTP4 := WQ.mux(
+                Q4 -> rs2,
+                Q2 -> Extend2bTo4b(rs2d2),
+                Q1 -> Extend2bTo4b(Extend1bTo2b(rs2d4)),
+                default -> B(0, xlen bits) // Invalid
+            )
+            ToDOTP2 := WQ.mux(
+                Q2 -> rs2,
+                Q1 -> Extend1bTo2b(rs2d2),
+                default -> B(0, xlen bits) // Invalid
+            )
+            ToDOTP1 := WQ.mux(
+                Q1 -> rs2,
+                default -> B(0, xlen bits) // Invalid
+            )
+
+            OPA := rs1
+        }
+
+        val PROD8 = Payload(Vec(SInt(16 bits), xlen/8))
+        val PROD4 = Payload(Vec(SInt(8 bits), xlen/4))
+        val PROD2 = Payload(Vec(SInt(4 bits), xlen/2))
+        val PROD1 = Payload(Vec(SInt(2 bits), xlen/1))
+
+        val prod = new el.Execute(prodAt) {
+            //Compute the product of the two vectors
+            val prod8 = Product(OPA, ToDOTP8, bitWidth = 8)
+            val prod4 = Product(OPA, ToDOTP4, bitWidth = 4)
+            val prod2 = Product(OPA, ToDOTP2, bitWidth = 2)
+            val prod1 = ProductBin(OPA, ToDOTP1)
+            
+            PROD8.zipWithIndex.foreach{case (p, i) =>
+                p := prod8(i)
+            }
+            PROD4.zipWithIndex.foreach{case (p, i) =>
+                p := prod4(i)
+            }
+            PROD2.zipWithIndex.foreach{case (p, i) =>
+                p := prod2(i)
+            }
+            PROD1.zipWithIndex.foreach{case (p, i) =>
+                p := prod1(i)
+            }
+        }
+
+        val sum = new el.Execute(sumAt) {
+            //Compute the sum of the products
+            RES := AQ.mux(
+                Q8 -> AdderTree(PROD8),
+                Q4 -> AdderTree(PROD4),
+                Q2 -> AdderTree(PROD2),
+                Q1 -> AdderTree(PROD1)
+                ).asBits
         }
 
         val format = new el.Execute(id = formatAt) {
