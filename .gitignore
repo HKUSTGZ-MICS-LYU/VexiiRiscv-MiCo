@@ -8,6 +8,7 @@
 .*.swp
 *.tcl
 *.sh
+vivado*
 
 # sbt specific
 .cache/
@@ -68,3 +69,5 @@ tmp/
 
 vnc_done
 docker_xfce4.lop
+
+rpt/

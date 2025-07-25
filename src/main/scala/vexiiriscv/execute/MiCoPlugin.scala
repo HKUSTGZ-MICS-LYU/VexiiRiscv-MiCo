@@ -216,7 +216,7 @@ class MiCoPlugin(val layer : LaneLayer,
             val result = AQ.mux(
                 Q8 -> DotProduct(OPA, ToDOTP8, bitWidth = 8),
                 Q4 -> DotProduct(OPA, ToDOTP4, bitWidth = 4),
-                Q2 -> DotProductSym2Bit(OPA, ToDOTP2),
+                Q2 -> DotProduct(OPA, ToDOTP2, bitWidth = 2),
                 Q1 -> DotProductSym1Bit(OPA, ToDOTP1)
             )
             RES := result.asBits
@@ -230,11 +230,11 @@ class MiCoPlugin(val layer : LaneLayer,
     }
 }
 
-class MiCoPluginLegacy(val layer : LaneLayer,
+class MiCoPluginV2(val layer : LaneLayer,
                 var extractAt : Int = 0,
                 var prodAt : Int = 1,
-                var sumAt : Int = 2,
-                var formatAt : Int = 2) extends ExecutionUnitElementSimple(layer) {
+                var sumAt : Int = 1,
+                var formatAt : Int = 1) extends ExecutionUnitElementSimple(layer) {
     
     import MiCoPlugin._
     import MiCoCompute._
@@ -353,6 +353,109 @@ class MiCoPluginLegacy(val layer : LaneLayer,
                 ).asBits
         }
 
+        val format = new el.Execute(id = formatAt) {
+            //Provide the computation value for the writeback
+            wb.valid := SEL
+            wb.payload := RES
+        }
+    }
+}
+
+
+class MiCoMultiCyclePlugin(
+                val layer : LaneLayer,
+                var formatAt : Int = 1,
+                var simdWidth : Int = 32) extends ExecutionUnitElementSimple(layer) {
+    
+    import MiCoPlugin._
+    import MiCoCompute._
+    import QType._
+    
+    val logic = during setup new Logic {
+        awaitBuild()
+        import SrcKeys._
+
+        val xlen = Riscv.XLEN.get
+        val xlenLog2 = log2Up(xlen)
+        assert(xlen >= simdWidth && (xlen % simdWidth) == 0, "xlen must be a multiple of simdWidth")
+        //Let's get the hardware interface that we will use to provide the result of our custom instruction
+        val wb = newWriteback(ifp, formatAt)
+
+        // 8-bit Engine Data Path
+        add(DOTP8x8).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q8)
+        add(DOTP8x4).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q4)
+        add(DOTP8x2).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q2)
+        add(DOTP8x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q8, WQ -> Q1)
+
+        // 4-bit Engine Data Path
+        add(DOTP4x4).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q4, WQ -> Q4)
+        add(DOTP4x2).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q4, WQ -> Q2)
+        add(DOTP4x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q4, WQ -> Q1)
+
+        // 2-bit Engine Data Path
+        add(DOTP2x2).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q2, WQ -> Q2)
+        add(DOTP2x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q2, WQ -> Q1)
+
+        // 1-bit Engine Data Path
+        add(DOTP1x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q1, WQ -> Q1)
+
+        // TODO: We don't support mixed width yet...
+
+        //Now that we are done specifying everything about the instructions, we can release the Logic.uopRetainer
+        //This will allow a few other plugins to continue their elaboration (ex : decoder, dispatcher, ...)
+        uopRetainer.release()
+
+        val RES = Payload(Bits(xlen bits)) // Result of the Dot Product
+
+        val process = new el.Execute(0) {
+            //Get the RISC-V RS1/RS2 values from the register file
+            val rs1 = el(IntRegFile, RS1).asBits  // rs1 holds the 1st vector
+            val rs2 = el(IntRegFile, RS2).asBits  // rs2 holds the 2nd vector
+
+            val rs1_offset = Reg(UInt(xlenLog2 bits)) init(0)
+            val rs2_offset = Reg(UInt(xlenLog2 bits)) init(0)
+
+            val opa = rs1(rs1_offset, simdWidth bits) // rs1 holds the 1st vector
+            val opb = rs2(rs2_offset, simdWidth bits) // rs2 holds the 2nd vector
+            val acc = Reg(SInt(xlen bits)) init(0) // Accumulator for the Dot Product
+
+            val partial_sum = WQ.mux(
+                Q8 -> DotProduct(opa, opb, bitWidth = 8),
+                Q4 -> DotProduct(opa, opb, bitWidth = 4),
+                Q2 -> DotProduct(opa, opb, bitWidth = 2),
+                Q1 -> DotProductSym1Bit(opa, opb)
+            )
+
+            // Multi-Cycle Control
+            val request = isValid && SEL
+            
+            // Calculate how many cycles we need based on data width
+            val totalCycles = xlen / simdWidth
+            val singleCycle = totalCycles == 1
+            val offset_inc = if (singleCycle) 0 else simdWidth
+            val cycleCount = if (singleCycle) U(0) else Reg(UInt(log2Up(totalCycles) bits)) init(0)
+            val isLastCycle = cycleCount === (totalCycles - 1)
+
+            val acc_add = acc + partial_sum
+            
+            when(request){
+                rs1_offset := rs1_offset + offset_inc
+                rs2_offset := rs2_offset + offset_inc
+                acc := acc_add
+                if(!singleCycle) cycleCount := cycleCount + 1
+            } otherwise {
+                rs1_offset := 0
+                rs2_offset := 0
+                acc := 0
+                if(!singleCycle) cycleCount := 0
+            }
+
+            val unscheduleRequest = RegNext(isCancel) clearWhen (isReady) init (False)
+            val freeze = request && !isLastCycle && !unscheduleRequest
+            el.freezeWhen(freeze)
+
+            RES := acc_add.asBits
+        }
         val format = new el.Execute(id = formatAt) {
             //Provide the computation value for the writeback
             wb.valid := SEL

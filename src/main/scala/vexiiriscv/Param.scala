@@ -132,6 +132,7 @@ class ParamSimple() {
   var withRvd = false
   var withRvZb = false
   var withRvv = false // Vector Extension
+  var vpuWidth = 32
   var withWhiteboxerOutputs = false
   var privParam = PrivilegedParam.base
   var lsuForkAt = 0
@@ -629,6 +630,7 @@ class ParamSimple() {
     opt[Unit]("without-lsu-bypass") action { (v, c) => withLsuBypass = false }
     opt[Unit]("with-iterative-shift") action { (v, c) => withIterativeShift = true }
     opt[Int]("div-radix") action { (v, c) => divRadix = v }
+    opt[Int]("vpu-width") action { (v, c) => vpuWidth = v }
     opt[String]("div-impl") action { (v, c) => divImpl = v }
     opt[Unit]("div-ipc") action { (v, c) => divArea = false }
     opt[Int]("fetch-fork-at") action { (v, c) => fetchForkAt = v }
@@ -1084,7 +1086,7 @@ class ParamSimple() {
       )
       plugins += new execute.vpu.VpuCsrPlugin()
       plugins += new execute.vpu.VpuAddPlugin(early0)
-      plugins += new execute.vpu.VpuDotPlugin(early0)
+      plugins += new execute.vpu.VpuDotPluginMultiCycle(early0, width = vpuWidth)
       plugins += new WriteBackPlugin(lane0, VectorRegFile, writeAt = 9, allowBypassFrom = allowBypassFrom.max(2))
     }
 
