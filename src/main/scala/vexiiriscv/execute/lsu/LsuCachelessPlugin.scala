@@ -94,8 +94,6 @@ class LsuCachelessPlugin(var layer : LaneLayer,
     val flushPort = ss.newFlushPort(layer.lane.getExecuteAge(forkAt), laneAgeWidth = Execute.LANE_AGE_WIDTH, withUopId = true)
     val frontend = new AguFrontend(layer, host)
 
-    val vecOffset = Reg(UInt(log2Up(VLEN/64) bits)) init(0)
-
     val iwb = ifp.access(wbAt)
     val fpwb = fpwbp.map(_.createPort(wbAt))
     val vecwb = vecwbp.map(_.createPort(wbAt))
@@ -128,7 +126,7 @@ class LsuCachelessPlugin(var layer : LaneLayer,
 
     vecwbp.foreach(_.addMicroOp(vecwb.get, layer, frontend.writeRfVector))
     for(vec <- frontend.writeRfVector) {
-      vecOffset := U(0)
+      // vecOffset := U(0)
       val spec = layer(vec)
       spec.setCompletion(wbAt)
     }
@@ -147,10 +145,11 @@ class LsuCachelessPlugin(var layer : LaneLayer,
     for(uop <- frontend.writingMem if layer(uop).completion.isEmpty) layer(uop).setCompletion(joinAt)
 
     retainer.release()
-
+    
     val injectCtrl = elp.ctrl(0)
     val inject = new injectCtrl.Area {
       SIZE := Decode.UOP(13 downto 12).asUInt
+      vecOffset := Decode.UOP(25 downto 23).asUInt.resized
     }
 
     // Hardware elaboration
@@ -447,7 +446,6 @@ class LsuCachelessPlugin(var layer : LaneLayer,
 
         when(SEL && !FLOAT && VECTOR) {
           vecWbBuffer(vecOffset) := rspShifted.resized
-          vecOffset := vecOffset + 1
           when(vecOffset === vecWbCnt) {
             if (VLEN.get == 128) {
               v.payload(63 downto 0) := vecWbBuffer(0)

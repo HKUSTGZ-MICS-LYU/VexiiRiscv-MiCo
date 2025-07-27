@@ -7,8 +7,7 @@ sbt "runMain vexiiriscv.tester.TestBench \
     --with-late-alu \
     --allow-bypass-from 0 \
     --div-radix 4 \
-    --vpu-width 8 \
+    --vpu-width 32 \
     --load-elf $1 \
     --no-rvls-check \
-    --print-stats  \
-    --trace-all"
+    --print-stats"

@@ -184,9 +184,7 @@ class LsuPlugin(var layer : LaneLayer,
     }
 
     vecwbp.foreach(_.addMicroOp(vecwb.get, layer, frontend.writeRfVector))
-    val vecOffset = Reg(UInt(log2Up(VLEN/64) bits)) init(0)
     for(vec <- frontend.writeRfVector) {
-      vecOffset := U(0)
       val spec = layer(vec)
       spec.setCompletion(wbAt)
     }
@@ -252,6 +250,7 @@ class LsuPlugin(var layer : LaneLayer,
     val injectCtrl = elp.ctrl(0)
     val inject = new injectCtrl.Area {
       SIZE := Decode.UOP(13 downto 12).asUInt
+      vecOffset := Decode.UOP(25 downto 23).asUInt.resized
     }
 
     val bus = master(LsuCachelessBus(busParam)).simPublic()
@@ -1001,7 +1000,6 @@ class LsuPlugin(var layer : LaneLayer,
 
         when(SEL && !FLOAT && VECTOR) {
           vecWbBuffer(vecOffset) := onCtrl.loadData.RESULT.resized
-          vecOffset := vecOffset + 1
           when(vecOffset === vecWbCnt) {
             if (VLEN.get == 128) {
               v.payload(63 downto 0) := vecWbBuffer(0)
