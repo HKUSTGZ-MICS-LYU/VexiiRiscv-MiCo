@@ -74,8 +74,9 @@ object VpuDotCompute extends AreaObject {
 }
 
 class VpuDotPluginMultiCycle(val layer: LaneLayer,
-                             var dotAt: Int = 0,
-                             var wbAt: Int = 1,
+                             var extractAt: Int = 0,
+                             var dotAt: Int = 1,
+                             var wbAt: Int = 2,
                              var width : Int = 32)extends ExecutionUnitElementSimple(layer) {
     val logic = during setup new Logic {
         awaitBuild()
@@ -86,9 +87,10 @@ class VpuDotPluginMultiCycle(val layer: LaneLayer,
         val vlen = Riscv.VLEN.get
         val vlenLog2 = log2Up(vlen)
         
+        val OPA = Payload(Bits(vlen bits))                          // Operand A (RS1)
+        val ToDOTP8, ToDOTP4, ToDOTP2 = Payload(Bits(vlen bits))    // Operand B
         val RES = Payload(Bits(xlen bits))
-        val INC = Payload(UInt(7 bits))
-        val ToDOTP8, ToDOTP4, ToDOTP2, ToDOTP1 = Payload(Bits(width bits))
+        val INC = Payload(UInt(vlenLog2 bits))
 
         val wb = newWriteback(ifp, wbAt)
         add(VectorExt.VecDOT)
@@ -98,51 +100,55 @@ class VpuDotPluginMultiCycle(val layer: LaneLayer,
 
         uopRetainer.release()
 
-        val dot = new el.Execute(dotAt) {
-            val rs1 = el(VectorRegFile, RS1)
-            val rs2 = el(VectorRegFile, RS2)
+        val extract = new el.Execute(extractAt) {
+            //Get the RISC-V RS1/RS2 values from the register file
+            val rs1 = el(VectorRegFile, RS1).asBits  // rs1 holds the 1st vector
+            val rs2 = el(VectorRegFile, RS2).asBits  // rs2 holds the 2nd vector
 
             // Dealing asymmetric width
             INC := config.getINC()
-            val OPB_offset = Reg(UInt(8 bits)) init(0)
+            val OPB_offset = Reg(UInt(vlenLog2 bits)) init(0)
             when(isValid && SEL){
                 OPB_offset := OPB_offset + INC
             }
             val OPB_half = rs2(OPB_offset, (vlen / 2) bits)
             val OPB_qter = rs2(OPB_offset, (vlen / 4) bits)
 
-            val full_offset = Reg(UInt(vlenLog2 bits)) init(0)
-            val half_offset = Reg(UInt(vlenLog2 - 1 bits)) init(0)
-            val qter_offset = Reg(UInt(vlenLog2 - 2 bits)) init(0)
+            ToDOTP8 := config.getRS2Width().mux(
+                U(3) -> rs2,
+                U(2) -> Extend4bTo8b(OPB_half),
+                U(1) -> Extend4bTo8b(Extend2bTo4b(OPB_qter)),
+                default -> B(0, vlen bits) // Invalid
+            )
+            ToDOTP4 := config.getRS2Width().mux(
+                U(2) -> rs2,
+                U(1) -> Extend2bTo4b(OPB_half),
+                default -> B(0, vlen bits) // Invalid
+            )
+            ToDOTP2 := config.getRS2Width().mux(
+                U(1) -> rs2,
+                default -> B(0, vlen bits) // Invalid
+            )
 
-            val opa = rs1(full_offset, width bits)
-            val opb = rs2(full_offset, width bits)
-            val opb_half = OPB_half(half_offset, (width / 2) bits)
-            val opb_qter = OPB_qter(qter_offset, (width / 4) bits)
+            OPA := rs1
+        }
+
+        val dot = new el.Execute(dotAt) {
+            val segment_offset = Reg(UInt(vlenLog2 bits)) init(0)
+
+            val opa = OPA(segment_offset, width bits)
+            val opb = config.getRS1Width().mux(
+                U(3) -> ToDOTP8(segment_offset, width bits),
+                U(2) -> ToDOTP4(segment_offset, width bits),
+                U(1) -> ToDOTP2(segment_offset, width bits),
+                default -> B(0, width bits)
+            )
             val acc = Reg(SInt(xlen bits)) init(0)
 
-            ToDOTP8 := config.getRS2Width().mux(
-                U(3) -> opb,
-                U(2) -> Extend4bTo8b(opb_half),
-                U(1) -> Extend4bTo8b(Extend2bTo4b(opb_qter)),
-                default -> B(0, width bits)
-            )
-
-            ToDOTP4 := config.getRS2Width().mux(
-                U(2) -> opb,
-                U(1) -> Extend2bTo4b(opb_half),
-                default -> B(0, width bits)
-            )
-
-            ToDOTP2 := config.getRS2Width().mux(
-                U(1) -> opb,
-                default -> B(0, width bits)
-            )
-
             val partial_sum = config.getRS1Width().mux(
-                U(3) -> DotProduct(opa, ToDOTP8, 8),
-                U(2) -> DotProduct(opa, ToDOTP4, 4),
-                U(1) -> DotProductSym2Bit(opa, ToDOTP2),
+                U(3) -> DotProduct(opa, opb, 8),
+                U(2) -> DotProduct(opa, opb, 4),
+                U(1) -> DotProductSym2Bit(opa, opb),
                 default -> S(0, xlen bits)
             )
 
@@ -151,24 +157,17 @@ class VpuDotPluginMultiCycle(val layer: LaneLayer,
             
             // Calculate how many cycles we need based on data width
             val totalCycles = vlen / width
-            val offset_inc_full = width
-            val offset_inc_half = width / 2
-            val offset_inc_qter = width / 4
             val cycleCount = Reg(UInt(log2Up(totalCycles) bits)) init(0)
             val isLastCycle = cycleCount === (totalCycles - 1)
             
             val acc_add = acc + partial_sum
 
             when(request){
-                full_offset := full_offset + offset_inc_full
-                half_offset := half_offset + offset_inc_half
-                qter_offset := qter_offset + offset_inc_qter
+                segment_offset := segment_offset + width
                 acc := acc_add
                 cycleCount := cycleCount + 1
             } otherwise {
-                full_offset := 0
-                half_offset := 0
-                qter_offset := 0
+                segment_offset := 0
                 acc := 0
                 cycleCount := 0
             }

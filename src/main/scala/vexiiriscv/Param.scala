@@ -1085,9 +1085,9 @@ class ParamSimple() {
         maskReadDuringWrite = false
       )
       plugins += new execute.vpu.VpuCsrPlugin()
-      plugins += new execute.vpu.VpuAddPlugin(early0)
+      // plugins += new execute.vpu.VpuAddPlugin(early0)
       plugins += new execute.vpu.VpuDotPluginMultiCycle(early0, width = vpuWidth)
-      plugins += new WriteBackPlugin(lane0, VectorRegFile, writeAt = 9, allowBypassFrom = allowBypassFrom.max(2))
+      plugins += new WriteBackPlugin(lane0, VectorRegFile, writeAt = 6, allowBypassFrom = allowBypassFrom.max(2))
     }
 
   }
