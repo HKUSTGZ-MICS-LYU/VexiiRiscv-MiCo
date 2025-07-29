@@ -411,9 +411,6 @@ class LsuCachelessPlugin(var layer : LaneLayer,
       val rspShifted = Bits(LSLEN bits)
       val wordBytes = LSLEN/8
 
-      val vecWbCnt = (VLEN / 64) - 1
-      val vecWbBuffer = Vec(Reg(Bits(64 bits)), VLEN/64)
-
       // Generate minimal mux to move from a wide aligned memory read to the register file shifter representation
       for (i <- 0 until wordBytes) {
         val srcSize = 1 << (log2Up(wordBytes) - log2Up(i + 1))
@@ -440,36 +437,16 @@ class LsuCachelessPlugin(var layer : LaneLayer,
         }
       }
 
-      vecwb.foreach{v =>                // Handling writeback for vector extension
-        v.valid := False
-        v.payload := B(0, VLEN.get bits)
+      val vecWbCnt = (VLEN / 64) - 1
+      val vecWbBuffer = Vec(Reg(Bits(64 bits)), VLEN/64 - 1)
 
-        when(SEL && !FLOAT && VECTOR) {
-          vecWbBuffer(vecOffset) := rspShifted.resized
-          when(vecOffset === vecWbCnt) {
-            if (VLEN.get == 128) {
-              v.payload(63 downto 0) := vecWbBuffer(0)
-              v.payload(127 downto 64) := rspShifted.resized
-              v.valid := True
-            } else if (VLEN.get == 256) {
-              v.payload(63 downto 0) := vecWbBuffer(0)
-              v.payload(127 downto 64) := vecWbBuffer(1)
-              v.payload(191 downto 128) := vecWbBuffer(2)
-              v.payload(255 downto 192) := rspShifted.resized
-              v.valid := True
-            } else if (VLEN.get == 512) {
-              v.payload(63 downto 0) := vecWbBuffer(0)
-              v.payload(127 downto 64) := vecWbBuffer(1)
-              v.payload(191 downto 128) := vecWbBuffer(2)
-              v.payload(255 downto 192) := vecWbBuffer(3)
-              v.payload(319 downto 256) := vecWbBuffer(4)
-              v.payload(383 downto 320) := vecWbBuffer(5)
-              v.payload(447 downto 384) := vecWbBuffer(6)
-              v.payload(511 downto 448) := rspShifted.resized
-              v.valid := True
-            }
-          }
-        }
+      when(SEL && !FLOAT && VECTOR) {
+        vecWbBuffer(vecOffset) := rspShifted.resized
+      }
+      // Handling writeback for vector extension
+      vecwb.foreach{v => 
+        v.valid := SEL && !FLOAT && VECTOR && (vecOffset === vecWbCnt)
+        v.payload := vecWbBuffer.asBits ## rspShifted.resized
       }
     }
 
