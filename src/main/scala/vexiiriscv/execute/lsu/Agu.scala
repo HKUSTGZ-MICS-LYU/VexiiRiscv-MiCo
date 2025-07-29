@@ -18,7 +18,7 @@ object AguPlugin extends AreaObject {
   val STORE = Payload(Bool())
   val ATOMIC = Payload(Bool()) // LR => ATOMIC && LOAD && !STORE, SC => ATOMIC && !LOAD && STORE, AMO => ATOMIC && LOAD && STORE
   val SIZE = Payload(UInt(2 bits)) // bytes = 1 << SIZE
-  val vecOffset = Payload(UInt(log2Up(Riscv.VLEN/64) bits))
+  val VEC_OFFSET = Payload(UInt(log2Up(Riscv.VLEN/64) bits))
   val FLOAT = Payload(Bool())
   val VECTOR = Payload(Bool())
   val CLEAN, INVALIDATE = Payload(Bool())

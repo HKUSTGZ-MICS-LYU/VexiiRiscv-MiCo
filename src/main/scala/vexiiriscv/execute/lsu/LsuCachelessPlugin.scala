@@ -126,7 +126,6 @@ class LsuCachelessPlugin(var layer : LaneLayer,
 
     vecwbp.foreach(_.addMicroOp(vecwb.get, layer, frontend.writeRfVector))
     for(vec <- frontend.writeRfVector) {
-      // vecOffset := U(0)
       val spec = layer(vec)
       spec.setCompletion(wbAt)
     }
@@ -149,7 +148,7 @@ class LsuCachelessPlugin(var layer : LaneLayer,
     val injectCtrl = elp.ctrl(0)
     val inject = new injectCtrl.Area {
       SIZE := Decode.UOP(13 downto 12).asUInt
-      vecOffset := Decode.UOP(25 downto 23).asUInt.resized
+      VEC_OFFSET := Decode.UOP(25 downto 23).asUInt
     }
 
     // Hardware elaboration
@@ -441,11 +440,11 @@ class LsuCachelessPlugin(var layer : LaneLayer,
       val vecWbBuffer = Vec(Reg(Bits(64 bits)), VLEN/64 - 1)
 
       when(SEL && !FLOAT && VECTOR) {
-        vecWbBuffer(vecOffset) := rspShifted.resized
+        vecWbBuffer(VEC_OFFSET) := rspShifted.resized
       }
       // Handling writeback for vector extension
       vecwb.foreach{v => 
-        v.valid := SEL && !FLOAT && VECTOR && (vecOffset === vecWbCnt)
+        v.valid := SEL && !FLOAT && VECTOR && (VEC_OFFSET === vecWbCnt)
         v.payload := vecWbBuffer.asBits ## rspShifted.resized
       }
     }

@@ -250,7 +250,7 @@ class LsuPlugin(var layer : LaneLayer,
     val injectCtrl = elp.ctrl(0)
     val inject = new injectCtrl.Area {
       SIZE := Decode.UOP(13 downto 12).asUInt
-      vecOffset := Decode.UOP(25 downto 23).asUInt.resized
+      VEC_OFFSET := Decode.UOP(25 downto 23).asUInt
     }
 
     val bus = master(LsuCachelessBus(busParam)).simPublic()
@@ -978,9 +978,6 @@ class LsuPlugin(var layer : LaneLayer,
       iwb.valid := SEL && !FLOAT && !VECTOR
       iwb.payload := onCtrl.loadData.RESULT.resized
 
-      val vecWbCnt = (VLEN / 64) - 1
-      val vecWbBuffer = Vec(Reg(Bits(64 bits)), VLEN/64)
-
       if (withRva) when(l1.ATOMIC && !l1.LOAD) {
         iwb.payload(0) := onCtrl.SC_MISS
         iwb.payload(7 downto 1) := 0  // other bits set to 0 by using `LoadSpec(8, ...)` for the instruction
@@ -994,38 +991,21 @@ class LsuPlugin(var layer : LaneLayer,
         }
       }
 
-      vecwb.foreach{v =>                // Handling writeback for vector extension
-        v.valid := False
-        v.payload := B(0, VLEN.get bits)
+      val vecWbCnt = (VLEN / 64) - 1
+      val vecWbBuffer = Vec(Reg(Bits(64 bits)), VLEN/64 - 1)
+      val loadVecData = onCtrl.loadData.RESULT
 
-        when(SEL && !FLOAT && VECTOR) {
-          vecWbBuffer(vecOffset) := onCtrl.loadData.RESULT.resized
-          when(vecOffset === vecWbCnt) {
-            if (VLEN.get == 128) {
-              v.payload(63 downto 0) := vecWbBuffer(0)
-              v.payload(127 downto 64) := onCtrl.loadData.RESULT.resized
-              v.valid := True
-            } else if (VLEN.get == 256) {
-              v.payload(63 downto 0) := vecWbBuffer(0)
-              v.payload(127 downto 64) := vecWbBuffer(1)
-              v.payload(191 downto 128) := vecWbBuffer(2)
-              v.payload(255 downto 192) := onCtrl.loadData.RESULT.resized
-              v.valid := True
-            } else if (VLEN.get == 512) {
-              v.payload(63 downto 0) := vecWbBuffer(0)
-              v.payload(127 downto 64) := vecWbBuffer(1)
-              v.payload(191 downto 128) := vecWbBuffer(2)
-              v.payload(255 downto 192) := vecWbBuffer(3)
-              v.payload(319 downto 256) := vecWbBuffer(4)
-              v.payload(383 downto 320) := vecWbBuffer(5)
-              v.payload(447 downto 384) := vecWbBuffer(6)
-              v.payload(511 downto 448) := onCtrl.loadData.RESULT.resized
-              v.valid := True
-            }
-          }
-        }
+      val isVec = SEL && VECTOR && !FLOAT
+      val isFinal = VEC_OFFSET === vecWbCnt
+      
+      when (isVec && !isFinal){
+        vecWbBuffer(VEC_OFFSET) := loadVecData.resized
       }
-
+      // Handling writeback for vector extension
+      vecwb.foreach{v =>
+        v.valid := isVec && isFinal
+        v.payload := vecWbBuffer.asBits ## loadVecData
+      }
       val storeFire      = down.isFiring && AguPlugin.SEL && l1.STORE && !onPma.IO && !FROM_PREFETCH
       val storeBroadcast = down.isReady && l1.SEL && l1.STORE && !l1.ABORD && !l1.SKIP_WRITE && !l1.MISS && !l1.MISS_UNIQUE && !l1.HAZARD
     }
