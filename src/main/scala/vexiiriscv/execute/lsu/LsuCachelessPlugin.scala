@@ -148,7 +148,6 @@ class LsuCachelessPlugin(var layer : LaneLayer,
     val injectCtrl = elp.ctrl(0)
     val inject = new injectCtrl.Area {
       SIZE := Decode.UOP(13 downto 12).asUInt
-      VEC_OFFSET := Decode.UOP(25 downto 23).asUInt
     }
 
     // Hardware elaboration
@@ -170,8 +169,26 @@ class LsuCachelessPlugin(var layer : LaneLayer,
       }
     }
 
+    val VEC_OFFSET = Payload(UInt(log2Up(VLEN / LSLEN) bits))
+    val onVecAddress = new elp.Execute(0) {
+      val vecOffset = Reg(UInt(log2Up(VLEN / LSLEN) bits)) init(0)
+      val vecWbCnt = (VLEN / LSLEN) - 1 // Number of vector writeback buffers minus one
+      val vecSel = SEL && VECTOR
+      val vecLdBusy = vecSel && LOAD && (vecOffset =/= vecWbCnt)  
+      
+      when(vecLdBusy) {
+        vecOffset := vecOffset + 1
+      } otherwise {
+        vecOffset := 0
+      }
+
+      val VEC_ADDR = insert(srcp.ADD_SUB.asUInt + (vecOffset << log2Up(LSLEN / 8)).resized)
+      VEC_OFFSET := vecOffset
+    }
+    
     val onAddress = new addressCtrl.Area {
-      val RAW_ADDRESS = insert(srcp.ADD_SUB.asUInt)
+      val vecAddr = onVecAddress.VEC_ADDR.resized
+      val RAW_ADDRESS = insert(VECTOR.mux(vecAddr, srcp.ADD_SUB.asUInt))
 
       val translationPort = ats.newTranslationPort(
         nodes = Seq(addressCtrl.down),
@@ -442,10 +459,11 @@ class LsuCachelessPlugin(var layer : LaneLayer,
       when(SEL && !FLOAT && VECTOR) {
         vecWbBuffer(VEC_OFFSET) := rspShifted.resized
       }
+      val finalData = rspShifted.resized ## vecWbBuffer.asBits
       // Handling writeback for vector extension
       vecwb.foreach{v => 
         v.valid := SEL && !FLOAT && VECTOR && (VEC_OFFSET === vecWbCnt)
-        v.payload := vecWbBuffer.asBits ## rspShifted.resized
+        v.payload := finalData
       }
     }
 

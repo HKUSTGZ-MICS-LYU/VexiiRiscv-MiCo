@@ -1,0 +1,17 @@
+sbt "runMain vexiiriscv.tester.TestBench \
+    --vlen 512 \
+    --vpu-width 32 \
+    --decoders 2\
+    --lanes 2\
+    --with-aligner-buffer \
+    --with-rvv \
+    --with-rvc \
+    --with-mul \
+    --with-div \
+    --with-late-alu \
+    --allow-bypass-from 0 \
+    --div-radix 4 \
+    --load-elf $1 \
+    --no-rvls-check \
+    --print-stats \
+    --trace-all"
