@@ -8,7 +8,7 @@ import spinal.lib.fsm._
 import spinal.lib.misc.pipeline.Payload
 import spinal.lib.misc.plugin.FiberPlugin
 import vexiiriscv.Global._
-import vexiiriscv.execute.{CsrAccessPlugin, CsrListFilter, CsrRamPlugin, CsrRamService, ExecuteLanePlugin}
+import vexiiriscv.execute.{CsrAccessPlugin, CsrCondFilter, CsrListFilter, CsrRamPlugin, CsrRamService, ExecuteLanePlugin}
 import vexiiriscv.riscv._
 import vexiiriscv.riscv.Riscv._
 import vexiiriscv._
@@ -27,6 +27,7 @@ object PrivilegedParam{
     withUser       = false,
     withUserTrap   = false,
     withRdTime     = false,
+    withSSTC       = false,
     withDebug      = false,
     mstatusFsInit  = 0,
     vendorId       = 0,
@@ -54,6 +55,7 @@ case class PrivilegedParam(var withSupervisor : Boolean,
                            var withUser: Boolean,
                            var withUserTrap: Boolean,
                            var withRdTime : Boolean,
+                           var withSSTC : Boolean,
                            var withDebug: Boolean,
                            var mstatusFsInit : Int,
                            var debugTriggers : Int,
@@ -68,7 +70,7 @@ case class PrivilegedParam(var withSupervisor : Boolean,
 }
 
 case class Delegator(var enable: Bool, privilege: Int)
-case class InterruptSpec(var cond: Bool, id: Int, privilege: Int, delegators: List[Delegator])
+case class InterruptSpec(var cond: Bool, id: Int, privilege: Int, priority: Int, delegators: List[Delegator])
 case class ExceptionSpec(id: Int, delegators: List[Delegator])
 
 /**
@@ -173,7 +175,10 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         val exception = ArrayBuffer[ExceptionSpec]()
 
         def addInterrupt(cond: Bool, id: Int, privilege: Int, delegators: List[Delegator]): Unit = {
-          interrupt += InterruptSpec(cond, id, privilege, delegators)
+          val iprio = InterruptInfo.defaultOrder.indexOf(id)
+          require(iprio != -1, "New registered interrupt must be added to InterruptPrio.defaultOrder")
+
+          interrupt += InterruptSpec(cond, id, privilege, iprio + 1, delegators)
         }
       }
 
@@ -423,7 +428,6 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
             csrrw(CSR.TDATA1, read, 2 -> execute, 3 -> u, 4 -> s, 6 -> m, XLEN - 5 -> dmode, 12 -> action, 20 -> hit, 16 -> size(1 downto 0))
             if(size.getWidth > 2) csrrw(CSR.TDATA1, read, 21 -> size(3 downto 2))
             csrr(CSR.TDATA1, read, XLEN - 4 -> tpe)
-            csrr(CSR.TDATA1, read, 21 -> B(12))
 
             val load, store = RegInit(False)
             val chain = RegInit(False).allowUnsetRegToAvoidLatch
@@ -614,6 +618,11 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         spec.addInterrupt(ip.meip && ie.meie, id = 11, privilege = 3, delegators = Nil)
       }
 
+      val mcounteren = p.withRdTime generate new Area {
+        val tm = Reg(True)
+        api.readWrite(tm, CSR.MCOUNTEREN, 1)
+      }
+
       val s = p.withSupervisor generate new Area {
         val cause = new api.Csr(CSR.SCAUSE) {
           val interrupt = RegInit(False)
@@ -633,15 +642,53 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
           cap.trapNextOnWrite += CsrListFilter(List(CSR.SSTATUS))
         }
 
+        val sstc = new Area {
+          val envcfg = new Area {
+            val enable = RegInit(False)
+            val allowUpdate = Bool(p.withRdTime && p.withSSTC)
+
+            if (XLEN.get == 32) {
+              api.read(enable, CSR.MENVCFGH, 31)
+              api.writeWhen(enable, allowUpdate, CSR.MENVCFGH, 31)
+            } else {
+              api.read(enable, CSR.MENVCFG, 63)
+              api.writeWhen(enable, allowUpdate, CSR.MENVCFG, 63)
+            }
+          }
+
+          val logic = (p.withRdTime && p.withSSTC) generate new Area {
+            val cmp = RegInit(U(64 bits, default -> true))
+            val ip = RegNext(rdtime >= cmp)
+
+            val accessable =  withMachinePrivilege || (mcounteren.tm && envcfg.enable)
+
+            val filter = CsrCondFilter(CSR.STIMECMP, accessable)
+            val filterh = CsrCondFilter(CSR.STIMECMPH, accessable)
+
+            if (XLEN.get == 32) {
+              api.read(cmp(31 downto 0), filter)
+              api.write(cmp(31 downto 0), filter)
+              api.read(cmp(63 downto 32), filterh)
+              api.write(cmp(63 downto 32), filterh)
+            } else {
+              api.read(cmp, filter)
+              api.write(cmp, filter)
+            }
+          }
+
+          val interrupt = if (p.withRdTime && p.withSSTC) logic.ip else False
+        }
+
         val ip = new Area {
           val seipSoft = RegInit(False)
           val seipInput = RegNext(int.s.external)
           val seipOr = seipSoft || seipInput
-          val stip = RegInit(False)
+          val stipSoft = RegInit(False)
+          val stipOr = Mux(sstc.envcfg.enable, sstc.interrupt, stipSoft)
           val ssip = RegInit(False)
 
           val seipMasked = seipOr && m.ideleg.se
-          val stipMasked = stip && m.ideleg.st
+          val stipMasked = stipOr && m.ideleg.st
           val ssipMasked = ssip && m.ideleg.ss
         }
 
@@ -670,26 +717,33 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         api.read(ip.seipOr, CSR.MIP, 9)
         api.write(ip.seipSoft, CSR.MIP, 9)
         api.read(ip.seipOr && m.ideleg.se, CSR.SIP, 9)
-        mapMie(CSR.MIP, CSR.SIP, 5, ip.stip, m.ideleg.st, sWrite = false)
+        api.writeWhen(ip.stipSoft, !sstc.envcfg.enable, CSR.MIP, 5)
+        api.read(ip.stipOr, CSR.MIP, 5)
+        api.read(ip.stipOr && m.ideleg.st, CSR.SIP, 5)
         mapMie(CSR.MIP, CSR.SIP, 1, ip.ssip, m.ideleg.ss)
         api.readToWrite(ip.seipSoft, CSR.MIP, 9) //Avoid an external interrupt value to propagate to the soft external interrupt register.
 
 
         spec.addInterrupt(ip.ssip && ie.ssie, id = 1, privilege = 1, delegators = List(Delegator(m.ideleg.ss, 3)))
-        spec.addInterrupt(ip.stip && ie.stie, id = 5, privilege = 1, delegators = List(Delegator(m.ideleg.st, 3)))
+        spec.addInterrupt(ip.stipOr && ie.stie, id = 5, privilege = 1, delegators = List(Delegator(m.ideleg.st, 3)))
         spec.addInterrupt(ip.seipOr && ie.seie, id = 9, privilege = 1, delegators = List(Delegator(m.ideleg.se, 3)))
 
         for ((id, enable) <- m.edeleg.mapping) spec.exception += ExceptionSpec(id, List(Delegator(enable, 3)))
       }
 
-      if (p.withRdTime) {
+      val time = p.withRdTime generate new Area {
+        val accessable =  withMachinePrivilege || mcounteren.tm
+
+        val filter = CsrCondFilter(CSR.UTIME, accessable)
+        val filterh = CsrCondFilter(CSR.UTIMEH, accessable)
+
         XLEN.get match {
           case 32 => {
-            api.read(rdtime(31 downto 0), CSR.UTIME)
-            api.read(rdtime(63 downto 32), CSR.UTIMEH)
+            api.read(rdtime(31 downto 0), filter)
+            api.read(rdtime(63 downto 32), filterh)
           }
           case 64 => {
-            api.read(rdtime, CSR.UTIME)
+            api.read(rdtime, filter)
           }
         }
       }

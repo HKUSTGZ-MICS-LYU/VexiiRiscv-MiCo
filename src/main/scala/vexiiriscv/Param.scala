@@ -123,8 +123,9 @@ class ParamSimple() {
   var withDiv = false
   var withRva = false
   var withRvf = false
+  var withRve = false
   var withRvcbm = false
-  var withRvZknAes = true
+  var withRvZknAes = false
   var gshareBanks = 1
   var btbDualPortRam = true
   var fpuIgnoreSubnormal = false
@@ -490,7 +491,8 @@ class ParamSimple() {
   // Generate a human redable name from most of the supported configuration
   def getName() : String = {
     def opt(that : Boolean, v : String) = that.mux(v, "")
-    var isa = s"rv${xlen}i"
+    var isa = s"rv${xlen}"
+    if (withRve) isa += "e" else isa += "i"
     if (withMul) isa += s"m"
     if (withRva) isa += "a"
     if (withRvf) isa += "f"
@@ -561,6 +563,7 @@ class ParamSimple() {
     opt[Unit]("with-mul").unbounded() action { (v, c) => withMul = true }
     opt[Unit]("with-div").unbounded() action { (v, c) => withDiv = true }
     opt[Unit]("with-rvm") action { (v, c) => withMul = true; withDiv = true }
+    opt[Unit]("with-rve") action { (v, c) => withRve = true }
     opt[Unit]("with-rva") action { (v, c) => withRva = true }
     opt[Unit]("with-rvf") action { (v, c) => withRvf = true }
     opt[Unit]("with-rvd") action { (v, c) => withRvd = true; withRvf = true }
@@ -650,6 +653,7 @@ class ParamSimple() {
     opt[Int]("pmp-granularity") action { (v, c) => pmpParam.granularity = v }
     opt[Unit]("pmp-tor-disable") action { (v, c) => pmpParam.withTor = false }
     opt[Unit]("with-rdtime") action { (v, c) => privParam.withRdTime = true }
+    opt[Unit]("with-sstc") action { (v, c) => privParam.withSSTC = true }
     opt[Unit]("with-cfu") action { (v, c) => withCfu = true }
     opt[Int]("asid-width") action{ (v,c) => asidWidth = v }
     opt[Int]("gshare-bytes") action{ (v,c) => gshareBytes = v }
@@ -689,7 +693,7 @@ class ParamSimple() {
 
     val intWritebackAt = 2 //Alias for "trap at" as well
 
-    plugins += new riscv.RiscvPlugin(xlen, hartCount, rvf = withRvf, rvd = withRvd, rvc = withRvc)
+    plugins += new riscv.RiscvPlugin(xlen, hartCount, rvf = withRvf, rvd = withRvd, rvc = withRvc, rve = withRve)
     withMmu match {
       case false => plugins += new vexiiriscv.memory.StaticTranslationPlugin(physicalWidth)
       case true => plugins += new vexiiriscv.memory.MmuPlugin(
@@ -816,7 +820,7 @@ class ParamSimple() {
 
     plugins += new regfile.RegFilePlugin(
       spec = riscv.IntRegFile,
-      physicalDepth = 32,
+      physicalDepth = if(withRve) 16 else 32,
       preferedWritePortForInit = "lane0",
       syncRead = regFileSync,
       dualPortRam = regFileDualPortRam,
