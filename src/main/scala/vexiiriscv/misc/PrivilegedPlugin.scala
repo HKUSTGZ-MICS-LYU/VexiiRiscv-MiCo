@@ -70,7 +70,7 @@ case class PrivilegedParam(var withSupervisor : Boolean,
 }
 
 case class Delegator(var enable: Bool, privilege: Int)
-case class InterruptSpec(var cond: Bool, id: Int, privilege: Int, delegators: List[Delegator])
+case class InterruptSpec(var cond: Bool, id: Int, privilege: Int, priority: Int, delegators: List[Delegator])
 case class ExceptionSpec(id: Int, delegators: List[Delegator])
 
 /**
@@ -175,7 +175,10 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         val exception = ArrayBuffer[ExceptionSpec]()
 
         def addInterrupt(cond: Bool, id: Int, privilege: Int, delegators: List[Delegator]): Unit = {
-          interrupt += InterruptSpec(cond, id, privilege, delegators)
+          val iprio = InterruptInfo.defaultOrder.indexOf(id)
+          require(iprio != -1, "New registered interrupt must be added to InterruptPrio.defaultOrder")
+
+          interrupt += InterruptSpec(cond, id, privilege, iprio + 1, delegators)
         }
       }
 
@@ -425,7 +428,6 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
             csrrw(CSR.TDATA1, read, 2 -> execute, 3 -> u, 4 -> s, 6 -> m, XLEN - 5 -> dmode, 12 -> action, 20 -> hit, 16 -> size(1 downto 0))
             if(size.getWidth > 2) csrrw(CSR.TDATA1, read, 21 -> size(3 downto 2))
             csrr(CSR.TDATA1, read, XLEN - 4 -> tpe)
-            csrr(CSR.TDATA1, read, 21 -> B(12))
 
             val load, store = RegInit(False)
             val chain = RegInit(False).allowUnsetRegToAvoidLatch
@@ -660,17 +662,14 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
 
             val accessable =  withMachinePrivilege || (mcounteren.tm && envcfg.enable)
 
-            val filter = CsrCondFilter(CSR.STIMECMP, accessable)
-            val filterh = CsrCondFilter(CSR.STIMECMPH, accessable)
-
             if (XLEN.get == 32) {
-              api.read(cmp(31 downto 0), filter)
-              api.write(cmp(31 downto 0), filter)
-              api.read(cmp(63 downto 32), filterh)
-              api.write(cmp(63 downto 32), filterh)
+              api.readWrite(cmp(31 downto 0), CSR.STIMECMP)
+              api.readWrite(cmp(63 downto 32), CSR.STIMECMPH)
+              api.allowCsr(CSR.STIMECMP, accessable)
+              api.allowCsr(CSR.STIMECMPH, accessable)
             } else {
-              api.read(cmp, filter)
-              api.write(cmp, filter)
+              api.readWrite(cmp, CSR.STIMECMP)
+              api.allowCsr(CSR.STIMECMP, accessable)
             }
           }
 
@@ -732,16 +731,16 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
       val time = p.withRdTime generate new Area {
         val accessable =  withMachinePrivilege || mcounteren.tm
 
-        val filter = CsrCondFilter(CSR.UTIME, accessable)
-        val filterh = CsrCondFilter(CSR.UTIMEH, accessable)
-
         XLEN.get match {
           case 32 => {
-            api.read(rdtime(31 downto 0), filter)
-            api.read(rdtime(63 downto 32), filterh)
+            api.read(rdtime(31 downto 0), CSR.UTIME)
+            api.read(rdtime(63 downto 32), CSR.UTIMEH)
+            api.allowCsr(CSR.UTIME, accessable)
+            api.allowCsr(CSR.UTIMEH, accessable)
           }
           case 64 => {
-            api.read(rdtime, filter)
+            api.read(rdtime, CSR.UTIME)
+            api.allowCsr(CSR.UTIME, accessable)
           }
         }
       }
