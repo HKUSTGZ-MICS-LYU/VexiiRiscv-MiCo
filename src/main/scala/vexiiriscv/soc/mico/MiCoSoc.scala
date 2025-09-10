@@ -88,6 +88,9 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
     val patcher = Fiber patch new Area {
       p.ramElf.foreach(new Elf(_, p.vexii.xlen).init(ram.thread.logic.mem, 0x80000000l))
       println(MemoryConnection.getMemoryTransfers(cpu.dBus).mkString("\n"))
+      if (p.ramBlackBox) {
+        ram.thread.logic.mem.generateAsBlackBox()
+      }
     }
   }
 }
