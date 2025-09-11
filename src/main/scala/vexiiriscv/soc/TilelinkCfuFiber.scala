@@ -142,7 +142,8 @@ object VectorDotCompute extends AreaObject {
 }
 
 case class VpuCfuParameter(
-  var vlen : Int = 128
+  var vlen : Int = 128,
+  var vregs : Int = 2
 )
 
 class VpuCfu(cfuParam: CfuBusParameter, 
@@ -151,6 +152,7 @@ class VpuCfu(cfuParam: CfuBusParameter,
 
     val xlen = 32
     val vlen = vpuParam.vlen
+    val vregs = vpuParam.vregs
     val vlenLog2 = log2Up(vlen)
     val nLoad = vlen / xlen
 
@@ -162,19 +164,18 @@ class VpuCfu(cfuParam: CfuBusParameter,
     import VectorDotCompute._
     val func3 = io.bus.cmd.function_id.asBits
 
-    val rs1 = Reg(Bits(vlen bits)) init(0)
-    val rs2 = Reg(Bits(vlen bits)) init(0)
 
-    val RD = RegInit(False)
+    // Vector Register File (TODO: Full FF implementation is not efficient!)
+    val vectorRegs = Vec(Reg(Bits(vlen bits)) init(0), vpuParam.vregs)
+
     val accessAddr = Reg(UInt(32 bits)) init(0)
-    
     val cfuBusy = RegInit(False)
 
     // Load
     val memValid = RegInit(False)
     val memReady = RegInit(False)
     val loadVecOffset = Reg(UInt(log2Up(nLoad) bits)) init(0)
-    val bufferArray = Vec(Reg(Bits(32 bits)) init(0), nLoad - 1)
+    val bufferArray = Vec(Reg(Bits(xlen bits)) init(0), nLoad - 1)
     
     val isLoad   = func3 === B"100"
     val isConfig = func3 === B"010"
@@ -201,11 +202,19 @@ class VpuCfu(cfuParam: CfuBusParameter,
     io.bus.cmd.ready := !cfuBusy
     io.bus.rsp.outputs(0) := 0
 
+    val decode = new Area {
+        val RS1 = UInt(log2Up(vregs) bits)
+        val RS2 = UInt(log2Up(vregs) bits)
+        RS1 := io.bus.cmd.raw_insn(19 downto 15).resize(log2Up(vregs)).asUInt // rs1
+        RS2 := io.bus.cmd.raw_insn(24 downto 20).resize(log2Up(vregs)).asUInt // rs2
+    }
+    val LoadRD = Reg(UInt(log2Up(vregs) bits)) init(0)
+
     // State Machine Control
     when(!cfuBusy) {
         when(io.bus.cmd.valid && isLoad) {
             accessAddr := io.bus.cmd.inputs(0).asUInt
-            RD := io.bus.cmd.raw_insn(20)
+            LoadRD := io.bus.cmd.raw_insn(24 downto 20).resize(log2Up(vregs)).asUInt // rd = rs2
             loadVecOffset := 0
             cfuBusy := True
             memValid := True
@@ -213,12 +222,14 @@ class VpuCfu(cfuParam: CfuBusParameter,
         when(io.bus.cmd.valid && isVDot) {
             cfuBusy := False
             io.bus.rsp.valid := True
+            val rs1 = vectorRegs(decode.RS1)
+            val rs2 = vectorRegs(decode.RS2)
             io.bus.rsp.outputs(0) := DotProduct(rs1, rs2, 8).asBits
         }
     } otherwise {
         when(io.dBus.a.fire) {
             // report(L"[Memory Test] Command Sent: address 0x$accessAddr")
-            accessAddr := accessAddr + 4
+            accessAddr := accessAddr + (xlen / 8)
             memValid := False
             memReady := True
         }
@@ -231,12 +242,7 @@ class VpuCfu(cfuParam: CfuBusParameter,
             when(loadVecOffset === (nLoad - 1)) {
                 cfuBusy := False
                 io.bus.rsp.valid := True
-                // io.bus.rsp.outputs(0) := bufferArray(loadVecOffset)
-                when(!RD) {
-                    rs1 := bufferArray.asBits ## io.dBus.d.data
-                } otherwise {
-                    rs2 := bufferArray.asBits ## io.dBus.d.data
-                }
+                vectorRegs(LoadRD) := bufferArray.asBits ## io.dBus.d.data
             } otherwise {
                 bufferArray(loadVecOffset) := io.dBus.d.data
                 memValid := True
