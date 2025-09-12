@@ -15,6 +15,8 @@ import scala.collection.mutable.ArrayBuffer
 
 import vexiiriscv.execute.cfu._
 
+import vexiiriscv.soc.mico.{VpuCfu, VpuCfuParameter}
+
 /* A Template for a Tilelink CFU (Custom Functional Unit) Fiber.
  * This fiber connects a CFU bus to CPU, allowing custom instructions
  * to be executed in a VexiiRiscv system.
@@ -116,141 +118,6 @@ class DemoCfu(cfuParam: CfuBusParameter, busParam: BusParameter) extends Compone
   io.dBus.d.ready := False
 }
 
-object VectorDotCompute extends AreaObject {
-    def DotProduct(op_a : Bits, op_b : Bits, vlen : Int) : SInt = {
-        val a_vec = op_a.subdivideIn(vlen bits)
-        val b_vec = op_b.subdivideIn(vlen bits)
-        val a_tmp = Vec(a_vec.zip(b_vec).map{case (a_i, b_i) => a_i.asSInt * b_i.asSInt})
-        a_tmp.reduceBalancedTree(_ +^ _).resize(32)
-    }
-
-    def Extend2bTo4b(op : Bits) : Bits = {
-        // Sign Extend 2-bit to 4-bit
-        val ext = op.subdivideIn(2 bits).reverse.map{
-            i => i.asSInt.resize(4).asBits
-        }.reduce(_ ## _)
-        ext
-    }
-
-    def Extend4bTo8b(op : Bits) : Bits = {
-        // Sign Extend 4-bit to 8-bit
-        val ext = op.subdivideIn(4 bits).reverse.map{
-            i => i.asSInt.resize(8).asBits
-        }.reduce(_ ## _)
-        ext
-    }
-}
-
-case class VpuCfuParameter(
-  var vlen : Int = 128,
-  var vregs : Int = 2
-)
-
-class VpuCfu(cfuParam: CfuBusParameter, 
-            busParam: BusParameter, 
-            vpuParam: VpuCfuParameter) extends Component {
-
-    val xlen = 32
-    val vlen = vpuParam.vlen
-    val vregs = vpuParam.vregs
-    val vlenLog2 = log2Up(vlen)
-    val nLoad = vlen / xlen
-
-    val io = new Bundle {
-        val bus = slave(CfuBus(cfuParam))         // Linking CPU
-        val dBus = master(tilelink.Bus(busParam)) // Linking Memory
-    }
-
-    import VectorDotCompute._
-    val func3 = io.bus.cmd.function_id.asBits
-
-
-    // Vector Register File (TODO: Full FF implementation is not efficient!)
-    val vectorRegs = Vec(Reg(Bits(vlen bits)) init(0), vpuParam.vregs)
-
-    val accessAddr = Reg(UInt(32 bits)) init(0)
-    val cfuBusy = RegInit(False)
-
-    // Load
-    val memValid = RegInit(False)
-    val memReady = RegInit(False)
-    val loadVecOffset = Reg(UInt(log2Up(nLoad) bits)) init(0)
-    val bufferArray = Vec(Reg(Bits(xlen bits)) init(0), nLoad - 1)
-    
-    val isLoad   = func3 === B"100"
-    val isConfig = func3 === B"010"
-    val isVDot   = func3 === B"001"
-
-    // CFU response defaults
-    io.bus.rsp.valid := False
-    io.bus.rsp.response_id := io.bus.cmd.request_id
-    if (cfuParam.CFU_WITH_STATUS) io.bus.rsp.status := B"000"
-
-    // Tilelink bus defaults
-    io.dBus.a.opcode  := tilelink.Opcode.A.GET
-    io.dBus.a.param   := 0
-    io.dBus.a.source  := 0
-    io.dBus.a.data    := 0
-    io.dBus.a.address := accessAddr
-    io.dBus.a.mask    := B"1111"
-    io.dBus.a.size    := 2 // 32 bits
-    io.dBus.a.corrupt := False
-    io.dBus.a.valid   := memValid
-    io.dBus.d.ready   := memReady
-
-    // CFU command ready
-    io.bus.cmd.ready := !cfuBusy
-    io.bus.rsp.outputs(0) := 0
-
-    val decode = new Area {
-        val RS1 = UInt(log2Up(vregs) bits)
-        val RS2 = UInt(log2Up(vregs) bits)
-        RS1 := io.bus.cmd.raw_insn(19 downto 15).resize(log2Up(vregs)).asUInt // rs1
-        RS2 := io.bus.cmd.raw_insn(24 downto 20).resize(log2Up(vregs)).asUInt // rs2
-    }
-    val LoadRD = Reg(UInt(log2Up(vregs) bits)) init(0)
-
-    // State Machine Control
-    when(!cfuBusy) {
-        when(io.bus.cmd.valid && isLoad) {
-            accessAddr := io.bus.cmd.inputs(0).asUInt
-            LoadRD := io.bus.cmd.raw_insn(24 downto 20).resize(log2Up(vregs)).asUInt // rd = rs2
-            loadVecOffset := 0
-            cfuBusy := True
-            memValid := True
-        }
-        when(io.bus.cmd.valid && isVDot) {
-            cfuBusy := False
-            io.bus.rsp.valid := True
-            val rs1 = vectorRegs(decode.RS1)
-            val rs2 = vectorRegs(decode.RS2)
-            io.bus.rsp.outputs(0) := DotProduct(rs1, rs2, 8).asBits
-        }
-    } otherwise {
-        when(io.dBus.a.fire) {
-            // report(L"[Memory Test] Command Sent: address 0x$accessAddr")
-            accessAddr := accessAddr + (xlen / 8)
-            memValid := False
-            memReady := True
-        }
-        
-        when(io.dBus.d.fire) {
-            // report(L"[Memory Test] Read data 0x${io.dBus.d.data} from address 0x$accessAddr")
-            loadVecOffset := loadVecOffset + 1
-            memReady := False
-            
-            when(loadVecOffset === (nLoad - 1)) {
-                cfuBusy := False
-                io.bus.rsp.valid := True
-                vectorRegs(LoadRD) := bufferArray.asBits ## io.dBus.d.data
-            } otherwise {
-                bufferArray(loadVecOffset) := io.dBus.d.data
-                memValid := True
-            }
-        }
-    }
-}
-
 class TilelinkCfuFiber() extends Area {
 
   import TilelinkCfuFiber._
@@ -265,7 +132,7 @@ class TilelinkCfuFiber() extends Area {
       val cfuParam = getCfuBusParameters
 
       val cfuBus = CfuBus(cfuParam)
-      val vpuParam = VpuCfuParameter(vlen = 256)
+      val vpuParam = VpuCfuParameter(vlen = 256, maclen = 64)
       val cfu = new VpuCfu(cfuParam, dBus.p, vpuParam)
       
       cfu.io.bus <> cfuBus
