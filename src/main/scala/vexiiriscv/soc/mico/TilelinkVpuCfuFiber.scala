@@ -21,16 +21,10 @@ import vexiiriscv.execute.cfu._
  */
 
 object TilelinkVpuCfuFiber {
-  def getTilelinkSupport(proposed: bus.tilelink.M2sSupport) = bus.tilelink.SlaveFactory.getSupported(
-        addressWidth = 32,
-        dataWidth = 32,
-        allowBurst = false,
-        proposed = proposed
-    )
 
-  def getM2sParameters(name: Nameable) = tilelink.M2sParameters(
+  def getM2sParameters(name: Nameable, width: Int = 32) = tilelink.M2sParameters(
         addressWidth = 32,
-        dataWidth = 32,
+        dataWidth = width,
         masters = List(
           tilelink.M2sAgent(
             name = name,
@@ -38,8 +32,8 @@ object TilelinkVpuCfuFiber {
               tilelink.M2sSource(
                 id = SizeMapping(0, 1),
                 emits = M2sTransfers(
-                  get = tilelink.SizeRange(1, 32 / 8),
-                  putFull = tilelink.SizeRange(1, 32 / 8)
+                  get = tilelink.SizeRange(1, width / 8),
+                  putFull = tilelink.SizeRange(1, width / 8)
                 )
               )
             )
@@ -74,7 +68,7 @@ class TilelinkVpuCfuFiber(vpuParam: VpuCfuParameter) extends Area {
   val dBus = bus.bus
 
   val logic = Fiber build new Area{
-      bus.m2s forceParameters getM2sParameters(TilelinkVpuCfuFiber.this)
+      bus.m2s forceParameters getM2sParameters(TilelinkVpuCfuFiber.this, vpuParam.xlen)
       bus.s2m.supported load tilelink.S2mSupport.none()
 
       val cfuParam = getCfuBusParameters

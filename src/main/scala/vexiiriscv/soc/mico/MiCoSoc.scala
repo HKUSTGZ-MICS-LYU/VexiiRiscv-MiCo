@@ -35,7 +35,10 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
     val ram = new tilelink.fabric.RamFiber(p.ramBytes)
     ram.up at 0x80000000l of mainBus
 
-    val vpuParam = VpuCfuParameter(vlen = p.MiCoVpuLen, maclen = p.MiCoVpuWidth)
+    val vpuParam = VpuCfuParameter(
+      vlen = p.MiCoVpuLen, 
+      maclen = p.MiCoVpuWidth,
+      xlen = p.MiCoVpuBusWidth)
     val cfu = p.useMiCoVpu generate new TilelinkVpuCfuFiber(vpuParam){
       mainBus << bus
       bus.setDownConnection(a = StreamPipe.S2M)

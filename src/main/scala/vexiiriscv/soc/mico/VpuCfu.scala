@@ -52,6 +52,7 @@ object VectorDotCompute extends AreaObject {
 
 case class VpuCfuParameter(
   var vlen : Int = 128,
+  var xlen : Int = 64,
   var maclen : Int = 32,
   var vregs : Int = 2
 )
@@ -60,7 +61,7 @@ class VpuCfu(cfuParam: CfuBusParameter,
             busParam: BusParameter, 
             p: VpuCfuParameter) extends Component {
 
-    val xlen = 32
+    val xlen = busParam.dataWidth
     val vlen = p.vlen
     val vregs = p.vregs
     val maclen = p.maclen
@@ -99,13 +100,14 @@ class VpuCfu(cfuParam: CfuBusParameter,
     if (cfuParam.CFU_WITH_STATUS) io.bus.rsp.status := B"000"
 
     // Tilelink bus defaults
+    val mask = B(xlen / 8 bits, default -> True)
     io.dBus.a.opcode  := tilelink.Opcode.A.GET
     io.dBus.a.param   := 0
     io.dBus.a.source  := 0
     io.dBus.a.data    := 0
     io.dBus.a.address := accessAddr
-    io.dBus.a.mask    := B"1111"
-    io.dBus.a.size    := 2 // 32 bits
+    io.dBus.a.mask    := mask
+    io.dBus.a.size    := log2Up(xlen / 8)
     io.dBus.a.corrupt := False
     io.dBus.a.valid   := memValid
     io.dBus.d.ready   := memReady
@@ -286,10 +288,18 @@ class VpuCfu(cfuParam: CfuBusParameter,
                     vectorRegs(LoadRD) := bufferArray.asBits ## io.dBus.d.data
                     goto(IDLE)
                 } otherwise {
-                    bufferArray(loadVecOffset) := io.dBus.d.data
+                    if(nLoad == 2){
+                        bufferArray(0) := io.dBus.d.data
+                    }else{
+                        bufferArray(loadVecOffset) := io.dBus.d.data
+                    }
                     memValid := True
                 }
             }
+        }
+        LOAD.onExit {
+            memValid := False
+            memReady := False
         }
     }
 
