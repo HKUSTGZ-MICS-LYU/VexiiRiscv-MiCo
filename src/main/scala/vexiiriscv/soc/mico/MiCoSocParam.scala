@@ -15,12 +15,15 @@ class MiCoSocParam {
   val socCtrl = new SocCtrlParam()
   var withSpiFlash = false
 
+  var useMiCoVpu = false
+  var MiCoVpuLen = 256
+  var MiCoVpuWidth = 256
+
   // Provide some sane default
   vexii.fetchForkAt = 1
   vexii.lsuPmaAt = 1
   vexii.lsuForkAt = 1
   vexii.relaxedBranch = true
-  vexii.withCfu = true
   socCtrl.withJtagTap = false
   legalize()
 
@@ -31,7 +34,9 @@ class MiCoSocParam {
     opt[String]("ram-elf") action { (v, c) => ramElf = Some(new File(v)) }
     opt[Unit]("ram-blackbox") action { (v, c) => ramBlackBox = true  }
     opt[Boolean]("spi-flash") action { (v, c) => withSpiFlash = v  }
-
+    opt[Unit]("mico-vpu") action { (v, c) => useMiCoVpu = true; vexii.withCfu = true}
+    opt[Int]("mico-vpu-len") action { (v, c) => MiCoVpuLen = v }
+    opt[Int]("mico-vpu-width") action { (v, c) => MiCoVpuWidth = v }
     socCtrl.addOptions(parser)
     vexii.addOptions(parser)
   }

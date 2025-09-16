@@ -132,7 +132,7 @@ class TilelinkCfuFiber() extends Area {
       val cfuParam = getCfuBusParameters
 
       val cfuBus = CfuBus(cfuParam)
-      val vpuParam = VpuCfuParameter(vlen = 256, maclen = 64)
+      val vpuParam = VpuCfuParameter(vlen = 256, maclen = 256)
       val cfu = new VpuCfu(cfuParam, dBus.p, vpuParam)
       
       cfu.io.bus <> cfuBus

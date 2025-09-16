@@ -35,6 +35,18 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
     val ram = new tilelink.fabric.RamFiber(p.ramBytes)
     ram.up at 0x80000000l of mainBus
 
+    val vpuParam = VpuCfuParameter(vlen = p.MiCoVpuLen, maclen = p.MiCoVpuWidth)
+    val cfu = p.useMiCoVpu generate new TilelinkVpuCfuFiber(vpuParam){
+      mainBus << bus
+      bus.setDownConnection(a = StreamPipe.S2M)
+    }
+
+    val cfuConnect = p.vexii.withCfu generate (Fiber patch new Area {
+      val cpuCfuBus = cpu.logic.core.host[CfuPlugin].logic.bus
+      val cfuCfuBus = cfu.logic.cfuBus
+      cfuCfuBus << cpuCfuBus
+    })
+
     // Handle all the IO / Peripheral things
     val peripheral = new Area {
       // Some peripheral may require to have an access as big as the CPU XLEN, so, lets define a bus which ensure it.
@@ -74,16 +86,6 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
       val cpuPlic = cpu.bind(plic) // External interrupts connection
       val cpuClint = cpu.bind(clint) // Timer interrupt + time reference + stop time connection
     }
-
-    val cfu = new TilelinkCfuFiber()
-    mainBus << cfu.bus
-    cfu.bus.setDownConnection(a = StreamPipe.S2M) 
-
-    val cfuConnect = p.vexii.withCfu generate (Fiber patch new Area {
-      val cpuCfuBus = cpu.logic.core.host[CfuPlugin].logic.bus
-      val cfuCfuBus = cfu.logic.cfuBus
-      cfuCfuBus << cpuCfuBus
-    })
 
     val patcher = Fiber patch new Area {
       p.ramElf.foreach(new Elf(_, p.vexii.xlen).init(ram.thread.logic.mem, 0x80000000l))
