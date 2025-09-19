@@ -125,8 +125,8 @@ class VpuCfu(cfuParam: CfuBusParameter,
 
     val LoadRD = Reg(UInt(vregsLog2 bits)) init(0)
 
-    val rs1_offset = Reg(UInt(vlenLog2 bits)) init(0)
-    val rs2_offset = Reg(UInt(vlenLog2 bits)) init(0)
+    val shared_offset = Reg(UInt(vlenLog2 bits)) init(0)
+    val sub_offset = Reg(UInt(vlenLog2 bits)) init(0)
 
     val rs1 = vectorRegs(decode.RS1)
     val rs2 = vectorRegs(decode.RS2)
@@ -135,6 +135,7 @@ class VpuCfu(cfuParam: CfuBusParameter,
         val qa = Reg(UInt(4 bits)) init(8) // Element width for vector register 8/4/2/1 bits
         val qb = Reg(UInt(4 bits)) init(8) // Element width for vector register 8/4/2/1 bits
         val inc = UInt(vlenLog2 bits) // Increment for vector register offset
+        
         inc := qa.mux(
             U(8) -> qb.mux(
                 U(4) -> U(maclen / 2, vlenLog2 bits),
@@ -143,8 +144,8 @@ class VpuCfu(cfuParam: CfuBusParameter,
                 default -> U(offset_max, vlenLog2 bits)
             ),
             U(4) -> qb.mux(
-                U(4) -> U(maclen / 2, vlenLog2 bits),
-                U(2) -> U(maclen / 4, vlenLog2 bits),
+                U(2) -> U(maclen / 2, vlenLog2 bits),
+                U(1) -> U(maclen / 4, vlenLog2 bits),
                 default -> U(offset_max, vlenLog2 bits)
             ),
             U(2) -> qb.mux(
@@ -168,14 +169,18 @@ class VpuCfu(cfuParam: CfuBusParameter,
 
     val compute = new Area {
 
-        val isFirst = rs1_offset === 0
-        val opa = isFirst.mux(rs1(rs1_offset, maclen bits), rfRead.rs1(rs1_offset, maclen bits)) // A Look-ahead Logic to save one cycle
-        val opb = isFirst.mux(rs2(rs1_offset, maclen bits), rfRead.rs2(rs2_offset, maclen bits)) // A Look-ahead Logic to save one cycle
+        val isFirst = shared_offset === 0
+        val opa = isFirst.mux(
+            rs1(shared_offset, maclen bits), 
+            rfRead.rs1(shared_offset, maclen bits)) // A Look-ahead Logic to save one cycle
+        val opb = isFirst.mux(
+            rs2(shared_offset, maclen bits), 
+            rfRead.rs2(shared_offset, maclen bits)) // A Look-ahead Logic to save one cycle
         // Extract
-        val opb_d1 = opb(rs2_offset, maclen bits)
-        val opb_d2 = opb(rs2_offset, maclen / 2 bits)
-        val opb_d4 = opb(rs2_offset, maclen / 4 bits)
-        val opb_d8 = opb(rs2_offset, maclen / 8 bits)
+        val opb_d1 = opb(sub_offset, maclen bits)
+        val opb_d2 = opb(sub_offset, maclen / 2 bits)
+        val opb_d4 = opb(sub_offset, maclen / 4 bits)
+        val opb_d8 = opb(sub_offset, maclen / 8 bits)
 
         val opbDot8 = config.qb.mux(
             U(8) -> opb_d1,
@@ -214,12 +219,12 @@ class VpuCfu(cfuParam: CfuBusParameter,
             default -> S(0, 32 bits)
         )
 
-        done := (rs1_offset === (vlen - maclen))
+        done := (shared_offset === (vlen - maclen))
 
         when(sel){
-            rs1_offset := rs1_offset + offset_max
-            rs2_offset := rs2_offset + config.inc
-            acc := res
+            shared_offset := shared_offset + offset_max
+            sub_offset := sub_offset + config.inc
+            if(nCompute != 1) acc := res
         }
     }
 
@@ -234,11 +239,11 @@ class VpuCfu(cfuParam: CfuBusParameter,
                     goto(LOAD)
                 }
                 when(isVDot) {
+                    compute.sel := True // Start compute as soon as cmd arrives
                     if(nCompute == 1) {
                         io.bus.rsp.valid := True
                         io.bus.rsp.outputs(0) := compute.res.asBits
                     } else{
-                        compute.sel := True // Start compute as soon as cmd arrives
                         goto(VDOTP)
                     }
                 }
@@ -248,8 +253,8 @@ class VpuCfu(cfuParam: CfuBusParameter,
                     config.qa := decode.QA
                     config.qb := decode.QB
                     // Clear Compute
-                    rs1_offset := 0
-                    rs2_offset := 0
+                    shared_offset := 0
+                    sub_offset := 0
                     compute.acc := 0
                 }
             }
@@ -283,17 +288,24 @@ class VpuCfu(cfuParam: CfuBusParameter,
                 // report(L"[Memory Test] Read data 0x${io.dBus.d.data} from address 0x$accessAddr")
                 loadVecOffset := loadVecOffset + 1
                 memReady := False
-                when(loadVecOffset === (nLoad - 1)) {
+                if(nLoad == 1){
                     io.bus.rsp.valid := True
-                    vectorRegs(LoadRD) := bufferArray.asBits ## io.dBus.d.data
+                    vectorRegs(LoadRD) := io.dBus.d.data
                     goto(IDLE)
-                } otherwise {
-                    if(nLoad == 2){
-                        bufferArray(0) := io.dBus.d.data
-                    }else{
-                        bufferArray(loadVecOffset) := io.dBus.d.data
+                }
+                else{
+                    when(loadVecOffset === (nLoad - 1)) {
+                        io.bus.rsp.valid := True
+                        vectorRegs(LoadRD) := io.dBus.d.data ## bufferArray.asBits
+                        goto(IDLE)
+                    } otherwise {
+                        if(nLoad == 2){
+                            bufferArray(0) := io.dBus.d.data
+                        }else{
+                            bufferArray(loadVecOffset) := io.dBus.d.data
+                        }
+                        memValid := True
                     }
-                    memValid := True
                 }
             }
         }
