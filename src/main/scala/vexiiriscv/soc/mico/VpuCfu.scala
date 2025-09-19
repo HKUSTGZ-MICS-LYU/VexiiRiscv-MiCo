@@ -135,7 +135,7 @@ class VpuCfu(cfuParam: CfuBusParameter,
         val qa = Reg(UInt(4 bits)) init(8) // Element width for vector register 8/4/2/1 bits
         val qb = Reg(UInt(4 bits)) init(8) // Element width for vector register 8/4/2/1 bits
         val inc = UInt(vlenLog2 bits) // Increment for vector register offset
-        
+
         inc := qa.mux(
             U(8) -> qb.mux(
                 U(4) -> U(maclen / 2, vlenLog2 bits),
@@ -286,7 +286,6 @@ class VpuCfu(cfuParam: CfuBusParameter,
             }
             when(io.dBus.d.fire) {
                 // report(L"[Memory Test] Read data 0x${io.dBus.d.data} from address 0x$accessAddr")
-                loadVecOffset := loadVecOffset + 1
                 memReady := False
                 if(nLoad == 1){
                     io.bus.rsp.valid := True
@@ -294,6 +293,7 @@ class VpuCfu(cfuParam: CfuBusParameter,
                     goto(IDLE)
                 }
                 else{
+                    loadVecOffset := loadVecOffset + 1
                     when(loadVecOffset === (nLoad - 1)) {
                         io.bus.rsp.valid := True
                         vectorRegs(LoadRD) := io.dBus.d.data ## bufferArray.asBits
