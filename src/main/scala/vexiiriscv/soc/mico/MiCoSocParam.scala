@@ -20,6 +20,8 @@ class MiCoSocParam {
   var MiCoVpuWidth = 256
   var MiCoVpuBusWidth = 32
 
+  var useMiCoBitSerial = false
+
   // Provide some sane default
   vexii.fetchForkAt = 1
   vexii.lsuPmaAt = 1
@@ -39,6 +41,7 @@ class MiCoSocParam {
     opt[Int]("mico-vpu-len") action { (v, c) => MiCoVpuLen = v }
     opt[Int]("mico-vpu-width") action { (v, c) => MiCoVpuWidth = v }
     opt[Int]("mico-vpu-bus-width") action { (v, c) => MiCoVpuBusWidth = v }
+    opt[Unit]("mico-bs") action { (v, c) => useMiCoBitSerial = true }
     socCtrl.addOptions(parser)
     vexii.addOptions(parser)
   }

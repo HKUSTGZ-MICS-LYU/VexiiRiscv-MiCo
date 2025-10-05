@@ -44,6 +44,14 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
       bus.setDownConnection(a = StreamPipe.S2M)
     }
 
+    val accel = p.useMiCoBitSerial generate new BitSerialCoreFiber(
+      BitSerialCoreParam(xlen = 32)
+    ){
+      mainBus << down
+      down.setDownConnection(a = StreamPipe.S2M)
+      up at 0x18000000 of mainBus
+    }
+
     val cfuConnect = p.vexii.withCfu generate (Fiber patch new Area {
       val cpuCfuBus = cpu.logic.core.host[CfuPlugin].logic.bus
       val cfuCfuBus = cfu.logic.cfuBus
