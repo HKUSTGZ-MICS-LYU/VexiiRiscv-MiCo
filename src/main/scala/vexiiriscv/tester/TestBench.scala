@@ -214,7 +214,7 @@ class TestOptions {
 //        enableSimWave()
 //        sleep(1000)
 //        disableSimWave()
-//        sleep(100000)
+//        sleep(1000000)
 //      }
 //    }
 
@@ -322,6 +322,18 @@ class TestOptions {
       cmb.mem = mem
     }
     peripheral.withStdIn = withStdIn
+
+
+
+    dut.host.get[LsuPlugin].filter(_.withLlcFlush).map{p =>
+      val bus = p.logic.llcBus
+      val rspQueue = StreamDriver.queue(bus.rsp, cd)
+
+      StreamReadyRandomizer(bus.cmd, cd)
+      StreamMonitor(bus.cmd, cd){p =>
+        rspQueue._2.enqueue {p => }
+      }
+    }
 
 
     var forceProbe = Option.empty[Long => Unit]

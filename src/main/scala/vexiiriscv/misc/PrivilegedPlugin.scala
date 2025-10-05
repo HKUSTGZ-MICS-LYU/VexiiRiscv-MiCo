@@ -29,6 +29,7 @@ object PrivilegedParam{
     withRdTime     = false,
     withSSTC       = false,
     withDebug      = false,
+    withXs         = false,
     mstatusFsInit  = 0,
     vendorId       = 0,
     archId         = 46, //As spike
@@ -57,6 +58,7 @@ case class PrivilegedParam(var withSupervisor : Boolean,
                            var withRdTime : Boolean,
                            var withSSTC : Boolean,
                            var withDebug: Boolean,
+                           var withXs : Boolean,
                            var mstatusFsInit : Int,
                            var debugTriggers : Int,
                            var debugTriggersLsu : Boolean,
@@ -200,16 +202,17 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
 
         bus.resume.rsp.valid := False
 
+        val reseting = RegNext(False) init (True)
+        bus.haveReset := RegInit(False) setWhen (reseting) clearWhen (bus.ackReset)
         bus.running := hartRunning
         bus.halted := !hartRunning
-        bus.unavailable := BufferCC.withTag(ClockDomain.current.isResetActive)
+        bus.unavailable := reseting
 
         when(debugMode) {
           inhibateInterrupts(hartId)
         }
 
-        val reseting = RegNext(False) init (True)
-        bus.haveReset := RegInit(False) setWhen (reseting) clearWhen (bus.ackReset)
+
 
         val enterHalt = hartRunning.getAheadValue().fall(False)
         val doHalt = RegInit(False) setWhen (bus.haltReq && bus.running && !debugMode) clearWhen (enterHalt)
@@ -548,6 +551,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
           val tsr, tvm = p.withSupervisor generate RegInit(False)
           val tw = p.withUser.mux(RegInit(False), False)
           val mprv = RegInit(False) clearWhen(xretAwayFromMachine)
+          val xs = p.withXs generate RegInit(U(p.mstatusFsInit, 2 bits))
 
           if (RVF) {
             fpuEnable(hartId) setWhen (fs =/= 0)
@@ -556,6 +560,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
             }
           }
           if (withFs) sd setWhen (fs === 3)
+          if (p.withXs) sd setWhen (xs === 3)
 
 
           readWrite(7 -> mpie, 3 -> mie)
@@ -572,6 +577,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
           read(XLEN - 1 -> sd)
           readWrite(17 -> mprv)
           if (withFs) readWrite(13 -> fs)
+          if (p.withXs) readWrite(15 -> xs)
           if (p.withUser && XLEN.get == 64) read(32 -> U"10")
           if (p.withSupervisor && XLEN.get == 64) read(34 -> U"10")
           if (p.withSupervisor) readWrite(22 -> tsr, 20 -> tvm)
@@ -616,6 +622,12 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         spec.addInterrupt(ip.mtip && ie.mtie, id = 7, privilege = 3, delegators = Nil)
         spec.addInterrupt(ip.msip && ie.msie, id = 3, privilege = 3, delegators = Nil)
         spec.addInterrupt(ip.meip && ie.meie, id = 11, privilege = 3, delegators = Nil)
+
+        val topi = new Area {
+          val interrupt = Global.CODE().assignDontCare()
+          val priority = Mux(interrupt === B(0), B(0), B(1))
+          api.read(CSR.MTOPI, 0 -> priority, 16 -> interrupt)
+        }
       }
 
       val mcounteren = p.withRdTime generate new Area {
@@ -662,17 +674,14 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
 
             val accessable =  withMachinePrivilege || (mcounteren.tm && envcfg.enable)
 
-            val filter = CsrCondFilter(CSR.STIMECMP, accessable)
-            val filterh = CsrCondFilter(CSR.STIMECMPH, accessable)
-
             if (XLEN.get == 32) {
-              api.read(cmp(31 downto 0), filter)
-              api.write(cmp(31 downto 0), filter)
-              api.read(cmp(63 downto 32), filterh)
-              api.write(cmp(63 downto 32), filterh)
+              api.readWrite(cmp(31 downto 0), CSR.STIMECMP)
+              api.readWrite(cmp(63 downto 32), CSR.STIMECMPH)
+              api.allowCsr(CSR.STIMECMP, accessable)
+              api.allowCsr(CSR.STIMECMPH, accessable)
             } else {
-              api.read(cmp, filter)
-              api.write(cmp, filter)
+              api.readWrite(cmp, CSR.STIMECMP)
+              api.allowCsr(CSR.STIMECMP, accessable)
             }
           }
 
@@ -702,6 +711,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         val scratch = crs.readWriteRam(CSR.SSCRATCH)
 
         if (withFs) api.readWrite(CSR.SSTATUS, 13 -> m.status.fs)
+        if (p.withXs) api.readWrite(CSR.SSTATUS, 15 -> m.status.xs)
 
         def mapMie(machineCsr: Int, supervisorCsr: Int, bitId: Int, reg: Bool, machineDeleg: Bool, sWrite: Boolean = true): Unit = {
           api.read(reg, machineCsr, bitId)
@@ -729,21 +739,27 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         spec.addInterrupt(ip.seipOr && ie.seie, id = 9, privilege = 1, delegators = List(Delegator(m.ideleg.se, 3)))
 
         for ((id, enable) <- m.edeleg.mapping) spec.exception += ExceptionSpec(id, List(Delegator(enable, 3)))
+
+        val topi = new Area {
+          val interrupt = Global.CODE().assignDontCare()
+          val priority = Mux(interrupt === B(0), B(0), B(1))
+          api.read(CSR.STOPI, 0 -> priority, 16 -> interrupt)
+        }
       }
 
       val time = p.withRdTime generate new Area {
         val accessable =  withMachinePrivilege || mcounteren.tm
 
-        val filter = CsrCondFilter(CSR.UTIME, accessable)
-        val filterh = CsrCondFilter(CSR.UTIMEH, accessable)
-
         XLEN.get match {
           case 32 => {
-            api.read(rdtime(31 downto 0), filter)
-            api.read(rdtime(63 downto 32), filterh)
+            api.read(rdtime(31 downto 0), CSR.UTIME)
+            api.read(rdtime(63 downto 32), CSR.UTIMEH)
+            api.allowCsr(CSR.UTIME, accessable)
+            api.allowCsr(CSR.UTIMEH, accessable)
           }
           case 64 => {
-            api.read(rdtime, filter)
+            api.read(rdtime, CSR.UTIME)
+            api.allowCsr(CSR.UTIME, accessable)
           }
         }
       }
