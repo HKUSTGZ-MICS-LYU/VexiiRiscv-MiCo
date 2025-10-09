@@ -670,7 +670,7 @@ class LsuPlugin(var layer : LaneLayer,
           op = UOP(29, 3 bits),
           swap = UOP(27),
           mem = srcBuffer,
-          rf = elp(IntRegFile, riscv.RS2),
+          rf = up(elp(IntRegFile, riscv.RS2)),
           isWord = l1.SIZE === 2
         )
         val aluBuffer = RegNext(alu.result)
@@ -847,7 +847,9 @@ class LsuPlugin(var layer : LaneLayer,
       val fenceTrap = new Area{
         val enable = False
         val doIt = (l1.ATOMIC || FENCE) && enable
-        when(doIt) {
+        val doItReg = RegInit(False) setWhen(doIt) clearWhen(!elp.isFreezed())
+
+        when(doIt || doItReg) {
           lsuTrap := True
           trapPort.exception := False
           trapPort.code := TrapReason.REDO
@@ -924,7 +926,7 @@ class LsuPlugin(var layer : LaneLayer,
       abords += !l1.FLUSH && onPma.CACHED_RSP.fault
       abords += FROM_LSU && (!isValid || isCancel || FENCE)
       abords += mmuNeeded && MMU_FAILURE
-      abords += FROM_LSU && fenceTrap.doIt
+      abords += FROM_LSU && (fenceTrap.doIt || fenceTrap.doItReg)
       if(withStoreBuffer && withL1Cmb) abords += (l1.CLEAN || l1.INVALID) && wb.hit
       if(withStoreBuffer) abords += wb.loadHazard || wb.selfHazard
 
