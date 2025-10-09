@@ -124,6 +124,8 @@ class TrapPlugin(val trapAt : Int) extends FiberPlugin with TrapService {
       val askWake = False // ex : wake the CPU as an interrupt is pending
       val rvTrap = False // Instruction got a trap
       val fsmBusy = Bool() //TrapPlugin FSM is doing work, hold on
+
+      val holdPrivChange = False
     }
   }
 
@@ -224,6 +226,17 @@ class TrapPlugin(val trapAt : Int) extends FiberPlugin with TrapService {
         })
 
         val privilegeIndexedTriggers = privilegs.zip(privilegeTriggers)
+
+        /* Link xTOPI register */
+        val xtopi = privilegeIndexedTriggers.map{case (p, i) => new Area {
+          val triggered = i.triggered
+          val int = B(triggered.id).andMask(triggered.valid).resized
+
+          p match {
+            case 3 => csr.m.topi.interrupt := int
+            case 1 => csr.s.topi.interrupt := int
+          }
+        }}
 
         val result = privilegeIndexedTriggers.map{case (p, i) => {
           val int = InterruptState(CODE_WIDTH)
@@ -337,13 +350,13 @@ class TrapPlugin(val trapAt : Int) extends FiberPlugin with TrapService {
         val fsm = new StateMachine {
           val RESET = makeInstantEntry()
           val RUNNING, COMPUTE = new State()
-          val TRAP_EPC, TRAP_TVAL, TRAP_TVEC, TRAP_APPLY = new State()
+          val TRAP_EPC, TRAP_TVAL, TRAP_TVEC, TRAP_WAIT, TRAP_APPLY = new State()
           val XRET_EPC, XRET_APPLY = new State()
           val ATS_RSP = ats.mayNeedRedo generate new State()
           val JUMP = new State()
           val LSU_FLUSH = lsu.nonEmpty generate new State()
           val FETCH_FLUSH = fl1p.nonEmpty generate new State()
-          val ENTER_DEBUG, DPC_READ, RESUME = (priv.p.withDebug) generate new State()
+          val ENTER_DEBUG_WAIT, ENTER_DEBUG, DPC_READ, RESUME = (priv.p.withDebug) generate new State()
 
           val inflightTrap = trapPendings.map(_(hartId)).orR
           val holdPort = pcs.newHoldPort(hartId)
@@ -374,6 +387,7 @@ class TrapPlugin(val trapAt : Int) extends FiberPlugin with TrapService {
           val atsPorts = ats.mayNeedRedo generate new Area{
             val refill = ats.newRefillPort()
             refill.cmd.valid := False
+            refill.cmd.storageEnable := True
             refill.cmd.address := pending.state.tval.asUInt
             refill.cmd.storageId := pending.state.arg(2, ats.getStorageIdWidth() bits).asUInt
 
@@ -452,7 +466,7 @@ class TrapPlugin(val trapAt : Int) extends FiberPlugin with TrapService {
                     goto(TRAP_EPC)
                   }
                 } otherwise {
-                  goto(ENTER_DEBUG)
+                  goto(ENTER_DEBUG_WAIT)
                 }
               }
             } otherwise {
@@ -464,7 +478,9 @@ class TrapPlugin(val trapAt : Int) extends FiberPlugin with TrapService {
                   goto(RUNNING)
                 }
                 is(TrapReason.PRIV_RET) {
-                  goto(XRET_EPC)
+                  when(!api.harts(hartId).holdPrivChange){
+                    goto(XRET_EPC)
+                  }
                 }
                 is(TrapReason.FENCE_I) {
                   (lsul1.nonEmpty) match {
@@ -578,7 +594,7 @@ class TrapPlugin(val trapAt : Int) extends FiberPlugin with TrapService {
             when(crsPorts.write.ready) {
               goto(TRAP_TVEC)
               if (priv.p.withDebug) when(trapEnterDebug) {
-                goto(ENTER_DEBUG)
+                goto(ENTER_DEBUG_WAIT)
               }
             }
           }
@@ -591,6 +607,12 @@ class TrapPlugin(val trapAt : Int) extends FiberPlugin with TrapService {
               csr.s.tvec.getAddress()
             )
             when(crsPorts.read.ready) {
+              goto(TRAP_WAIT)
+            }
+          }
+
+          TRAP_WAIT.whenIsActive{
+            when(!api.harts(hartId).holdPrivChange){
               goto(TRAP_APPLY)
             }
           }
@@ -628,6 +650,12 @@ class TrapPlugin(val trapAt : Int) extends FiberPlugin with TrapService {
           }
 
           if(priv.p.withDebug) {
+            ENTER_DEBUG_WAIT.whenIsActive{
+              when(!api.harts(hartId).holdPrivChange){
+                goto(ENTER_DEBUG)
+              }
+            }
+
             csr.debug.bus.exception := False
             csr.debug.bus.ebreak := False
             ENTER_DEBUG.whenIsActive{

@@ -127,6 +127,7 @@ class ParamSimple() {
   var withRvcbm = false
   var withRvZknAes = false
   var withRvcbmLlc = false
+  var withTesterPlugin = false
   var gshareBanks = 1
   var btbDualPortRam = true
   var fpuIgnoreSubnormal = false
@@ -134,8 +135,12 @@ class ParamSimple() {
   var fpuMulParam = FpuMulParam()
   var fpuAddSharedParam = FpuAddSharedParam()
   var withRvd = false
-  var withRvZb = false
+  var withRvZba = false
+  var withRvZbb = false
+  var withRvZbc = false
+  var withRvZbs = false
   var withWhiteboxerOutputs = false
+  var withIndirectCsr = false
   var privParam = PrivilegedParam.base
   var lsuForkAt = 0
   var lsuPmaAt = 0
@@ -499,7 +504,11 @@ class ParamSimple() {
     if (withRvf) isa += "f"
     if (withRvd) isa += "d"
     if (withRvc) isa += "c"
-    if (withRvZb) isa += "ZbaZbbZbcZbs"
+    if (withRvZba) isa += "Zba"
+    if (withRvZbb) isa += "Zbb"
+    if (withRvZbc) isa += "Zbc"
+    if (withRvZbs) isa += "Zbs"
+    if (withIndirectCsr) isa += "Smcsrind" + privParam.withSupervisor.mux("Sscsrind", "")
     if (privParam.withSupervisor) isa += "s"
     if (privParam.withUser) isa += "u"
     val r = new ArrayBuffer[String]()
@@ -569,7 +578,11 @@ class ParamSimple() {
     opt[Unit]("with-rvf") action { (v, c) => withRvf = true }
     opt[Unit]("with-rvd") action { (v, c) => withRvd = true; withRvf = true }
     opt[Unit]("with-rvc") action { (v, c) => withRvc = true; withAlignerBuffer = true }
-    opt[Unit]("with-rvZb") action { (v, c) => withRvZb = true }
+    opt[Unit]("with-rvZb") action { (v, c) => withRvZba = true; withRvZbb = true; withRvZbc = true; withRvZbs = true }
+    opt[Unit]("with-rvZba") action { (v, c) => withRvZba = true }
+    opt[Unit]("with-rvZbb") action { (v, c) => withRvZbb = true }
+    opt[Unit]("with-rvZbc") action { (v, c) => withRvZbc = true }
+    opt[Unit]("with-rvZbs") action { (v, c) => withRvZbs = true }
     opt[Unit]("with-rvZcbm") action { (v, c) => withRvcbm = true }
     opt[Unit]("with-rvZcbm-llc") action { (v, c) => withRvcbm = true; withRvcbmLlc = true }
     opt[Unit]("with-rvZknAes") action { (v, c) => withRvZknAes = true }
@@ -585,6 +598,7 @@ class ParamSimple() {
     opt[Unit]("without-mmu") action { (v, c) => withMmu = false }
     opt[Unit]("without-mul") action { (v, c) => withMul = false }
     opt[Unit]("without-div") action { (v, c) => withDiv = false }
+    opt[Unit]("with-tester-plugin") action { (v, c) => withTesterPlugin = true }
     opt[Unit]("with-mul") action { (v, c) => withMul = true }
     opt[Unit]("with-div") action { (v, c) => withDiv = true }
     opt[Unit]("with-gshare") action { (v, c) => withGShare = true }
@@ -603,6 +617,7 @@ class ParamSimple() {
     opt[Unit]("regfile-infer-ports") action { (v, c) => regFileDualPortRam = false }
     opt[Unit]("regfile-reg-based") action { (v, c) => regFileRegBasedRam = true; regFileDualPortRam = false}
     opt[Int]("allow-bypass-from") action { (v, c) => allowBypassFrom = v }
+    opt[Unit]("with-indirect-csr") action { (v, c) => withIndirectCsr = true }
     opt[Int]("performance-counters").unbounded() action { (v, c) => withPerformanceCounters = true; additionalPerformanceCounters = v }
     opt[Unit]("without-performance-scountovf").unbounded() action { (v, c) => withPerformanceScountovf = false }
     opt[Unit]("with-fetch-l1").unbounded() action { (v, c) => fetchL1Enable = true }
@@ -738,8 +753,8 @@ class ParamSimple() {
       plugins += new prediction.HistoryPlugin()
     }
     def shifter(layer: LaneLayer, shiftAt: Int = 0, formatAt: Int = 0) = withIterativeShift match {
-      case false => new BarrelShifterPlugin(layer, with_slli_uw=withRvZb, shiftAt=shiftAt, formatAt=formatAt)
-      case true => new IterativeShifterPlugin(layer, with_slli_uw=withRvZb, shiftAt=shiftAt, formatAt=formatAt)
+      case false => new BarrelShifterPlugin(layer, with_slli_uw=withRvZba, shiftAt=shiftAt, formatAt=formatAt)
+      case true => new IterativeShifterPlugin(layer, with_slli_uw=withRvZba, shiftAt=shiftAt, formatAt=formatAt)
     }
 
 
@@ -886,7 +901,16 @@ class ParamSimple() {
         CFU_STATE_INDEX_NUM = 5
       )
     )
-    if(withRvZb) plugins ++= ZbPlugin.make(early0, formatAt=0)
+
+    plugins ++= ZbPlugin.make(
+      early0,
+      zba = withRvZba,
+      zbb = withRvZbb,
+      zbc = withRvZbc,
+      zbs = withRvZbs,
+      executeAt=0,
+      formatAt=0
+    )
 
     lsuBus match {
       case LsuBusEnum.native =>
@@ -990,8 +1014,10 @@ class ParamSimple() {
     plugins += new CsrRamPlugin()
     if(withPerformanceCounters) plugins += new PerformanceCounterPlugin(additionalCounterCount = additionalPerformanceCounters)
     plugins += new CsrAccessPlugin(early0, writeBackKey =  if(lanes == 1) "lane0" else "lane1")
+    if(withIndirectCsr) plugins += new IndirectCsrPlugin(privParam.withSupervisor)
     plugins += new PrivilegedPlugin(privParam, withHartIdInput.mux(null, hartId until hartId+hartCount))
     plugins += new TrapPlugin(trapAt = intWritebackAt)
+    if(withTesterPlugin) plugins += new TesterPlugin()
     plugins += new EnvPlugin(early0, executeAt = 0)
     if(embeddedJtagTap || embeddedJtagInstruction) plugins += new EmbeddedRiscvJtag(
       p = DebugTransportModuleParameter(
@@ -1014,7 +1040,15 @@ class ParamSimple() {
       plugins += new IntAluPlugin(late0, aluAt = lateAluAt, formatAt = lateAluAt)
       plugins += shifter(late0, shiftAt = lateAluAt, formatAt = lateAluAt)
       plugins += new BranchPlugin(late0, aluAt = lateAluAt, jumpAt = lateAluAt/*+relaxedBranch.toInt*/, wbAt = lateAluAt, withJalr = false)
-      if(withRvZb) plugins ++= ZbPlugin.make(late0, executeAt = lateAluAt, formatAt = lateAluAt)
+      plugins ++= ZbPlugin.make(
+        late0,
+        zba = withRvZba,
+        zbb = withRvZbb,
+        zbc = withRvZbc,
+        zbs = withRvZbs,
+        executeAt=lateAluAt,
+        formatAt=lateAluAt
+      )
     }
 
     plugins += new WriteBackPlugin(lane0, IntRegFile, writeAt = withLateAlu.mux(lateAluAt, intWritebackAt), allowBypassFrom = allowBypassFrom)
@@ -1030,7 +1064,15 @@ class ParamSimple() {
       plugins += shifter(early1, formatAt = relaxedShift.toInt)
       plugins += new IntFormatPlugin(lane1)
       plugins += new BranchPlugin(early1, aluAt = 0, jumpAt = relaxedBranch.toInt, wbAt = 0)
-      if(withRvZb) plugins ++= ZbPlugin.make(early1, formatAt=0)
+      plugins ++= ZbPlugin.make(
+        early1,
+        zba = withRvZba,
+        zbb = withRvZbb,
+        zbc = withRvZbc,
+        zbs = withRvZbs,
+        executeAt=0,
+        formatAt=0
+      )
 
       // Late ALU in the Second execution pipeline
       if(withLateAlu) {
@@ -1039,7 +1081,15 @@ class ParamSimple() {
         plugins += new IntAluPlugin(late1, aluAt = lateAluAt, formatAt = lateAluAt)
         plugins += shifter(late1, shiftAt = lateAluAt, formatAt = lateAluAt)
         plugins += new BranchPlugin(late1, aluAt = lateAluAt, jumpAt = lateAluAt/*+relaxedBranch.toInt*/, wbAt = lateAluAt, withJalr = false)
-        if(withRvZb) plugins ++= ZbPlugin.make(late1, executeAt = lateAluAt, formatAt = lateAluAt)
+        plugins ++= ZbPlugin.make(
+          late1,
+          zba = withRvZba,
+          zbb = withRvZbb,
+          zbc = withRvZbc,
+          zbs = withRvZbs,
+          executeAt=lateAluAt,
+          formatAt=lateAluAt
+        )
       }
 //      if (withMul) {
 //        plugins += new MulPlugin(early1)
