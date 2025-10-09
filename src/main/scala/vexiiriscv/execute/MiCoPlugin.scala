@@ -69,7 +69,7 @@ object MiCoCompute extends AreaObject {
     def DotProductSym1Bit(op_a : Bits, op_b : Bits) : SInt = {
         val xor = (op_a ^ op_b).asBools
         val count_n = xor.sCount(True)         // True is -1
-        (S(Riscv.XLEN.get) - (count_n << 1).asSInt).resize(Riscv.XLEN.get)
+        (S(op_a.getWidth) - (count_n << 1).asSInt).resize(32)
     }
 
     def Extend1bTo2b(op : Bits) : Bits = {
@@ -399,7 +399,6 @@ class MiCoMultiCyclePlugin(
         // 1-bit Engine Data Path
         add(DOTP1x1).srcs(SRC1.RF, SRC2.RF).decode(AQ -> Q1, WQ -> Q1)
 
-        // TODO: We don't support mixed width yet...
 
         //Now that we are done specifying everything about the instructions, we can release the Logic.uopRetainer
         //This will allow a few other plugins to continue their elaboration (ex : decoder, dispatcher, ...)
@@ -419,11 +418,35 @@ class MiCoMultiCyclePlugin(
             val opb = rs2(rs2_offset, simdWidth bits) // rs2 holds the 2nd vector
             val acc = Reg(SInt(xlen bits)) init(0) // Accumulator for the Dot Product
 
-            val partial_sum = WQ.mux(
-                Q8 -> DotProduct(opa, opb, bitWidth = 8),
-                Q4 -> DotProduct(opa, opb, bitWidth = 4),
-                Q2 -> DotProduct(opa, opb, bitWidth = 2),
-                Q1 -> DotProductSym1Bit(opa, opb)
+            val opb_d1 = opb(0, simdWidth bits)
+            val opb_d2 = opb(0, simdWidth / 2 bits)
+            val opb_d4 = opb(0, simdWidth / 4 bits)
+            val opb_d8 = opb(0, simdWidth / 8 bits)
+
+            val opbDot8 = WQ.mux(
+                Q8 -> opb_d1,
+                Q4 -> ExtendTo8b(opb_d2, 4),
+                Q2 -> ExtendTo8b(opb_d4, 2),
+                Q1 -> ExtendTo8b(Extend1bTo2b(opb_d8), 2),
+            )
+            val opbDot4 = WQ.mux(
+                Q4 -> opb_d1,
+                Q2 -> Extend2bTo4b(opb_d2),
+                Q1 -> Extend2bTo4b(Extend1bTo2b(opb_d4)),
+                default -> B(0, simdWidth bits)
+            )
+            val opbDot2 = WQ.mux(
+                Q2 -> opb_d1,
+                Q1 -> Extend1bTo2b(opb_d2),
+                default -> B(0, simdWidth bits)
+            )
+            val opbDot1 = opb_d1
+
+            val partial_sum = AQ.mux(
+                Q8 -> DotProduct(opa, opbDot8, bitWidth = 8),
+                Q4 -> DotProduct(opa, opbDot4, bitWidth = 4),
+                Q2 -> DotProduct(opa, opbDot2, bitWidth = 2),
+                Q1 -> DotProductSym1Bit(opa, opbDot1)
             )
 
             // Multi-Cycle Control
@@ -437,15 +460,34 @@ class MiCoMultiCyclePlugin(
             val isLastCycle = cycleCount === (totalCycles - 1)
 
             val acc_add = acc + partial_sum
+
+            val rs2_inc = UInt(xlenLog2 bits)
+
+            rs2_inc := AQ.mux(
+                Q8 -> WQ.mux(
+                    Q4 -> U(simdWidth / 2, xlenLog2 bits),
+                    Q2 -> U(simdWidth / 4, xlenLog2 bits),
+                    Q1 -> U(simdWidth / 8, xlenLog2 bits),
+                    default -> U(offset_inc, xlenLog2 bits)
+                    ),
+                Q4 -> WQ.mux(
+                    Q2 -> U(simdWidth / 2, xlenLog2 bits),
+                    Q1 -> U(simdWidth / 4, xlenLog2 bits),
+                    default -> U(offset_inc, xlenLog2 bits)
+                ),
+                Q2 -> WQ.mux(
+                    Q1 -> U(simdWidth / 2, xlenLog2 bits),
+                    default -> U(offset_inc, xlenLog2 bits)
+                ),
+                default -> U(offset_inc, xlenLog2 bits)
+            )
             
             when(request){
                 rs1_offset := rs1_offset + offset_inc
-                rs2_offset := rs2_offset + offset_inc
+                rs2_offset := rs2_offset + rs2_inc
                 acc := acc_add
                 if(!singleCycle) cycleCount := cycleCount + 1
             } otherwise {
-                rs1_offset := 0
-                rs2_offset := 0
                 acc := 0
                 if(!singleCycle) cycleCount := 0
             }
