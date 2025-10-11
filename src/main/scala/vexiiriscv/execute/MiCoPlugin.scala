@@ -406,6 +406,7 @@ class MiCoMultiCyclePlugin(
 
         val RES = Payload(Bits(xlen bits)) // Result of the Dot Product
 
+        // TODO: This could be pipelined like MiCoPluginV2
         val process = new el.Execute(0) {
             //Get the RISC-V RS1/RS2 values from the register file
             val rs1 = el(IntRegFile, RS1).asBits  // rs1 holds the 1st vector
@@ -442,13 +443,6 @@ class MiCoMultiCyclePlugin(
             )
             val opbDot1 = opb_d1
 
-            val partial_sum = AQ.mux(
-                Q8 -> DotProduct(opa, opbDot8, bitWidth = 8),
-                Q4 -> DotProduct(opa, opbDot4, bitWidth = 4),
-                Q2 -> DotProduct(opa, opbDot2, bitWidth = 2),
-                Q1 -> DotProductSym1Bit(opa, opbDot1)
-            )
-
             // Multi-Cycle Control
             val request = isValid && SEL
             
@@ -459,7 +453,17 @@ class MiCoMultiCyclePlugin(
             val cycleCount = if (singleCycle) U(0) else Reg(UInt(log2Up(totalCycles) bits)) init(0)
             val isLastCycle = cycleCount === (totalCycles - 1)
 
+            // Compute
+            val partial_sum = AQ.mux(
+                Q8 -> DotProduct(opa, opbDot8, bitWidth = 8),
+                Q4 -> DotProduct(opa, opbDot4, bitWidth = 4),
+                Q2 -> DotProduct(opa, opbDot2, bitWidth = 2),
+                Q1 -> DotProductSym1Bit(opa, opbDot1)
+            )
+
             val acc_add = acc + partial_sum
+
+            RES := acc_add.asBits
 
             val rs2_inc = UInt(xlenLog2 bits)
 
@@ -495,8 +499,6 @@ class MiCoMultiCyclePlugin(
             val unscheduleRequest = RegNext(isCancel) clearWhen (isReady) init (False)
             val freeze = request && !isLastCycle && !unscheduleRequest
             el.freezeWhen(freeze)
-
-            RES := acc_add.asBits
         }
         val format = new el.Execute(id = formatAt) {
             //Provide the computation value for the writeback

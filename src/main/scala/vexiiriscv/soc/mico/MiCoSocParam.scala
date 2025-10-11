@@ -19,14 +19,17 @@ class MiCoSocParam {
   var MiCoVpuLen = 256
   var MiCoVpuWidth = 256
   var MiCoVpuBusWidth = 32
+  var withL2Cache = false
+  var l2Ways = 4
+  var l2Bytes = 4096
 
   var useMiCoBitSerial = false
 
   // Provide some sane default
-  vexii.fetchForkAt = 1
-  vexii.lsuPmaAt = 1
-  vexii.lsuForkAt = 1
-  vexii.relaxedBranch = true
+  // vexii.fetchForkAt = 1
+  // vexii.lsuPmaAt = 1
+  // vexii.lsuForkAt = 1
+  // vexii.relaxedBranch = true
   socCtrl.withJtagTap = false
   legalize()
 
@@ -42,6 +45,9 @@ class MiCoSocParam {
     opt[Int]("mico-vpu-width") action { (v, c) => MiCoVpuWidth = v }
     opt[Int]("mico-vpu-bus-width") action { (v, c) => MiCoVpuBusWidth = v }
     opt[Unit]("mico-bs") action { (v, c) => useMiCoBitSerial = true }
+    opt[Unit]("l2-cache") action { (v, c) => withL2Cache = true; vexii.lsuL1Coherency = true}
+    opt[Int]("l2-ways") action { (v, c) => l2Ways = v }
+    opt[Int]("l2-bytes") action { (v, c) => l2Bytes = v }
     socCtrl.addOptions(parser)
     vexii.addOptions(parser)
   }
