@@ -294,7 +294,7 @@ class VpuCfu(cfuParam: CfuBusParameter,
             when(io.dBus.a.fire) {
                 // report(L"[Memory Test] Command Sent: address 0x$accessAddr")
                 offsetAddr := offsetNext
-                memFireId := memFireId + 1
+                if (nLoad != 1){memFireId :=  memFireId + 1}
                 when (cmdLast) {
                     memValid := False
                 }

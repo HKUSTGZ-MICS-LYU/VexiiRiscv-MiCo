@@ -70,7 +70,14 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
       cache.down.setDownConnection(d = StreamPipe.S2M)
       memBus = cache.down
     }
-    if(!p.withL2Cache) memBus = mainBus
+    // val hub = p.withHub generate new Area {
+    //   val hub = new HubFiber()
+    //   hub.up << mainBus
+    //   hub.up.setUpConnection(a = StreamPipe.FULL, c = StreamPipe.FULL, d = StreamPipe.FULL)
+    //   hub.down.setDownConnection(d = StreamPipe.S2M)
+    //   memBus = hub.down
+    // }
+    if(memBus == null) memBus = mainBus // No L2, no Hub, the CPU is directly connected to the memory bus
     memBus.forceDataWidth(p.vexii.memDataWidth)
 
     val mBus = new SlaveBus(
