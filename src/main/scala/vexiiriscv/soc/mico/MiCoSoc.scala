@@ -17,6 +17,7 @@ import spinal.lib.system.tag.MemoryConnection
 import vexiiriscv.execute.cfu.{CfuPlugin, CfuTest}
 import vexiiriscv.soc.{TilelinkVexiiRiscvFiber, TilelinkCfuFiber}
 import spinal.lib.bus.tilelink.coherent.{CacheFiber, HubFiber, SelfFLush}
+import spinal.lib.system.tag.PMA
 
 import vexiiriscv.soc.micro.{SocCtrl}
 
@@ -59,7 +60,7 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
       down.setDownConnection(a = StreamPipe.S2M)
       up at 0x18000000 of mainBus
     }
-
+    var memBus: Node = null
     val l2 = p.withL2Cache generate new Area {
       val cache = new CacheFiber(withCtrl = true)
       cache.parameter.cacheWays = p.l2Ways
@@ -67,18 +68,24 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
       cache.up << mainBus
       cache.up.setUpConnection(a = StreamPipe.FULL, c = StreamPipe.FULL, d = StreamPipe.FULL)
       cache.down.setDownConnection(d = StreamPipe.S2M)
+      memBus = cache.down
     }
+    if(!p.withL2Cache) memBus = mainBus
+    memBus.forceDataWidth(p.vexii.memDataWidth)
 
-    val memBus = tilelink.fabric.Node()
-
-    if (p.withL2Cache){
-      memBus << l2.cache.down
-    } else {
-      memBus << mainBus
-    }
+    val mBus = new SlaveBus(
+      M2sSupport(
+        transfers = M2sTransfers.all,
+        dataWidth = 32,
+        addressWidth = 32
+      ),
+      S2mParameters(Nil)
+    )
+    mBus.node at SizeMapping(0x80000000l, 0x80000000l) of memBus
+    mBus.node.addTags(PMA.MAIN, PMA.EXECUTABLE)
 
     val ram = new tilelink.fabric.RamFiber(p.ramBytes)
-    ram.up at 0x80000000l of memBus
+    ram.up at 0x40000000l of memBus
 
     // Handle all the IO / Peripheral things
     val peripheral = new Area {

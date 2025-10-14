@@ -6,6 +6,8 @@ import spinal.core.sim._
 import spinal.core.fiber._
 import spinal.lib.com.spi.sim.FlashModel
 import spinal.lib.com.uart.sim.{UartDecoder, UartEncoder}
+import spinal.lib.sim.SparseMemory
+import spinal.lib.bus.tilelink.sim.{Checker, MemoryAgent}
 import spinal.lib.misc.Elf
 import vexiiriscv.test.VexiiRiscvProbe
 
@@ -77,10 +79,22 @@ object MiCoSocSim extends App{
       spinal.lib.com.jtag.sim.JtagRemote(dut.socCtrl.debugModule.tap.jtag, hzToLong(p.socCtrl.systemFrequency)*4)
     }
 
+    // Use Sparse Memory to simulate off-chip mem instead of on-chip RAM block
+    val mem = SparseMemory(seed = 0, randOffset = 0x80000000l)
+    val ma = new MemoryAgent(
+      dut.system.mBus.node.bus, 
+      dut.socCtrl.system.cd , 
+      seed = 0, 
+      randomProberFactor = 0.2f, 
+      memArg = Some(mem))(null)
+    val checker = if (ma.monitor.bus.p.withBCE) Checker(ma.monitor)
+
+    ma.driver.driver.setFactor(0.8f) // with some random stalls
 
     if(elfFile != null) {
       val elf = new Elf(elfFile, p.vexii.xlen)
-      elf.load(dut.system.ram.thread.logic.mem, 0x80000000l, true)
+      // elf.load(dut.system.ram.thread.logic.mem, 0x80000000l, true)
+      elf.load(mem, 0x80000000l)
       if(p.withSpiFlash) elf.loadArray(spiFlash.content, 0x20000000l, true)
       probe.backends.foreach(_.loadElf(0, elfFile))
       probe.backends.foreach(_.loadElf(0, elfFile))
