@@ -55,7 +55,9 @@ case class VpuCfuParameter(
   var xlen : Int = 64,
   var maclen : Int = 32,
   var vregs : Int = 2
-)
+){
+    def pendingSize = vlen / xlen
+}
 
 class VpuCfu(cfuParam: CfuBusParameter, 
             busParam: BusParameter, 
@@ -82,14 +84,6 @@ class VpuCfu(cfuParam: CfuBusParameter,
     // Vector Register File (TODO: Full FF implementation is not efficient!)
     val vectorRegs = Vec(Reg(Bits(vlen bits)) init(0), vregs)
 
-    val accessAddr = Reg(UInt(32 bits)) init(0)
-
-    // Load
-    val memValid = RegInit(False)
-    val memReady = RegInit(False)
-    val loadVecOffset = Reg(UInt(log2Up(nLoad) bits)) init(0)
-    val bufferArray = Vec(Reg(Bits(xlen bits)) init(0), nLoad - 1)
-    
     val isLoad   = func3 === B"100"
     val isConfig = func3 === B"010"
     val isVDot   = func3 === B"001"
@@ -98,19 +92,6 @@ class VpuCfu(cfuParam: CfuBusParameter,
     io.bus.rsp.valid := False
     io.bus.rsp.response_id := io.bus.cmd.request_id
     if (cfuParam.CFU_WITH_STATUS) io.bus.rsp.status := B"000"
-
-    // Tilelink bus defaults
-    val mask = B(xlen / 8 bits, default -> True)
-    io.dBus.a.opcode  := tilelink.Opcode.A.GET
-    io.dBus.a.param   := 0
-    io.dBus.a.source  := 0
-    io.dBus.a.data    := 0
-    io.dBus.a.address := accessAddr
-    io.dBus.a.mask    := mask
-    io.dBus.a.size    := log2Up(xlen / 8)
-    io.dBus.a.corrupt := False
-    io.dBus.a.valid   := memValid
-    io.dBus.d.ready   := memReady
 
     val decode = new Area {
         val RS1 = UInt(vregsLog2 bits)
@@ -228,6 +209,35 @@ class VpuCfu(cfuParam: CfuBusParameter,
         }
     }
 
+
+    val baseAddr = Reg(UInt(32 bits)) init(0)
+    val offsetAddr = Reg(UInt(32 bits)) init(0)
+    val offsetNext = offsetAddr + (xlen / 8)
+    val accessAddr = baseAddr + offsetAddr
+    val cmdLast = offsetNext === (vlen / 8)
+    val loadVecHits = Vec.fill(nLoad)(RegInit(False))
+    val loadVecCount = loadVecHits.sCount(True)
+    val rspLast = loadVecCount === (nLoad - 1)
+
+    // Load
+    val memValid = RegInit(False)
+    val memReady = RegInit(False)
+    val memFireId = Reg(UInt(log2Up(vlen / xlen) bits)) init(0)
+    
+    // Tilelink bus defaults
+    val mask = B(xlen / 8 bits, default -> True)
+
+    io.dBus.a.opcode  := tilelink.Opcode.A.GET
+    io.dBus.a.param   := tilelink.Param.Hint.NO_ALLOCATE_ON_MISS
+    io.dBus.a.source  := memFireId
+    io.dBus.a.data    := 0
+    io.dBus.a.address := accessAddr
+    io.dBus.a.mask    := mask
+    io.dBus.a.size    := log2Up(xlen / 8)
+    io.dBus.a.corrupt := False
+    io.dBus.a.valid   := memValid
+    io.dBus.d.ready   := memReady
+
     val VpuFsm = new StateMachine {
         val IDLE = new State with EntryPoint
         val LOAD = new State
@@ -272,41 +282,33 @@ class VpuCfu(cfuParam: CfuBusParameter,
 
         // Loading State
         LOAD.onEntry {
-            accessAddr := io.bus.cmd.inputs(0).asUInt
+            baseAddr := io.bus.cmd.inputs(0).asUInt
             LoadRD := io.bus.cmd.raw_insn(24 downto 20).resize(vregsLog2).asUInt // rd = rs2
-            loadVecOffset := 0
+            offsetAddr := 0
+            memFireId := 0
             memValid := True
+            memReady := True
+            loadVecHits.foreach(_ := False)
         }
         LOAD.whenIsActive {
             when(io.dBus.a.fire) {
                 // report(L"[Memory Test] Command Sent: address 0x$accessAddr")
-                accessAddr := accessAddr + (xlen / 8)
-                memValid := False
-                memReady := True
+                offsetAddr := offsetNext
+                memFireId := memFireId + 1
+                when (cmdLast) {
+                    memValid := False
+                }
             }
             when(io.dBus.d.fire) {
                 // report(L"[Memory Test] Read data 0x${io.dBus.d.data} from address 0x$accessAddr")
-                memReady := False
-                if(nLoad == 1){
+                when (rspLast) {
+                    memReady := False
                     io.bus.rsp.valid := True
-                    vectorRegs(LoadRD) := io.dBus.d.data
                     goto(IDLE)
                 }
-                else{
-                    loadVecOffset := loadVecOffset + 1
-                    when(loadVecOffset === (nLoad - 1)) {
-                        io.bus.rsp.valid := True
-                        vectorRegs(LoadRD) := io.dBus.d.data ## bufferArray.asBits
-                        goto(IDLE)
-                    } otherwise {
-                        if(nLoad == 2){
-                            bufferArray(0) := io.dBus.d.data
-                        }else{
-                            bufferArray(loadVecOffset) := io.dBus.d.data
-                        }
-                        memValid := True
-                    }
-                }
+                loadVecHits(io.dBus.d.source) := True
+                val loadVecOffset = io.dBus.d.source.resized << log2Up(xlen)
+                vectorRegs(LoadRD)(loadVecOffset, xlen bits) := io.dBus.d.data
             }
         }
         LOAD.onExit {
