@@ -54,7 +54,8 @@ case class VpuCfuParameter(
   var vlen : Int = 128,
   var xlen : Int = 64,
   var maclen : Int = 32,
-  var vregs : Int = 2
+  var vregs : Int = 2,
+  var noWaitCompute : Boolean = true
 ){
     def pendingSize = vlen / xlen
 }
@@ -108,10 +109,7 @@ class VpuCfu(cfuParam: CfuBusParameter,
 
     val shared_offset = Reg(UInt(vlenLog2 bits)) init(0)
     val sub_offset = Reg(UInt(vlenLog2 bits)) init(0)
-
-    val rs1 = vectorRegs(decode.RS1)
-    val rs2 = vectorRegs(decode.RS2)
-
+    
     val config = new Area {
         val qa = Reg(UInt(4 bits)) init(8) // Element width for vector register 8/4/2/1 bits
         val qb = Reg(UInt(4 bits)) init(8) // Element width for vector register 8/4/2/1 bits
@@ -144,19 +142,16 @@ class VpuCfu(cfuParam: CfuBusParameter,
             RS1 := decode.RS1
             RS2 := decode.RS2
         }
-        val rs1 = vectorRegs(RS1)
-        val rs2 = vectorRegs(RS2)
+        val isFirst = p.noWaitCompute.mux(shared_offset === 0, False)
+        val rs1 = isFirst.mux(vectorRegs(decode.RS1), vectorRegs(RS1))
+        val rs2 = isFirst.mux(vectorRegs(decode.RS2), vectorRegs(RS2))
     }
 
     val compute = new Area {
 
-        val isFirst = shared_offset === 0
-        val opa = isFirst.mux(
-            rs1(shared_offset, maclen bits), 
-            rfRead.rs1(shared_offset, maclen bits)) // A Look-ahead Logic to save one cycle
-        val opb = isFirst.mux(
-            rs2(shared_offset, maclen bits), 
-            rfRead.rs2(shared_offset, maclen bits)) // A Look-ahead Logic to save one cycle
+        val opa = rfRead.rs1(shared_offset, maclen bits)
+        val opb = rfRead.rs2(shared_offset, maclen bits)
+        
         // Extract
         val opb_d1 = opb(sub_offset, maclen bits)
         val opb_d2 = opb(sub_offset, maclen / 2 bits)
@@ -186,7 +181,11 @@ class VpuCfu(cfuParam: CfuBusParameter,
         // Compute
         val acc = Reg(SInt(32 bits)) init(0)
         val sel = Bool()
-        val done = Bool()
+
+        val done = p.noWaitCompute.mux(
+            RegNext(shared_offset === (vlen - maclen)), 
+            shared_offset === (vlen - maclen))
+
         val partial = SInt(32 bits)
         val res = acc + partial
 
@@ -200,7 +199,6 @@ class VpuCfu(cfuParam: CfuBusParameter,
             default -> S(0, 32 bits)
         )
 
-        done := (shared_offset === (vlen - maclen))
 
         when(sel){
             shared_offset := shared_offset + offset_max
@@ -249,11 +247,15 @@ class VpuCfu(cfuParam: CfuBusParameter,
                     goto(LOAD)
                 }
                 when(isVDot) {
-                    compute.sel := True // Start compute as soon as cmd arrives
-                    if(nCompute == 1) {
-                        io.bus.rsp.valid := True
-                        io.bus.rsp.outputs(0) := compute.res.asBits
-                    } else{
+                    if(p.noWaitCompute){
+                        compute.sel := True
+                        if(nCompute == 1) {
+                            io.bus.rsp.valid := True
+                            io.bus.rsp.outputs(0) := compute.res.asBits
+                        } else{
+                            goto(VDOTP)
+                        }
+                    }else{
                         goto(VDOTP)
                     }
                 }
