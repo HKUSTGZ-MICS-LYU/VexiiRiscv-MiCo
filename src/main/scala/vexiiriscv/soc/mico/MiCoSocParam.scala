@@ -19,6 +19,7 @@ class MiCoSocParam {
   var MiCoVpuLen = 256
   var MiCoVpuWidth = 256
   var MiCoVpuBusWidth = 32
+  var MiCoVpuStress = false
   var withL2Cache = false
   var l2Ways = 4
   var l2Bytes = 4096
@@ -45,6 +46,7 @@ class MiCoSocParam {
     opt[Int]("mico-vpu-len") action { (v, c) => MiCoVpuLen = v }
     opt[Int]("mico-vpu-width") action { (v, c) => MiCoVpuWidth = v }
     opt[Int]("mico-vpu-bus-width") action { (v, c) => MiCoVpuBusWidth = v }
+    opt[Unit]("mico-vpu-stress") action { (v, c) => MiCoVpuStress = true }
     opt[Unit]("mico-bs") action { (v, c) => useMiCoBitSerial = true }
     opt[Unit]("l2-cache") action { (v, c) => withL2Cache = true; vexii.lsuL1Coherency = true}
     opt[Unit]("with-hub") action { (v, c) => withHub = true; vexii.lsuL1Coherency = true}

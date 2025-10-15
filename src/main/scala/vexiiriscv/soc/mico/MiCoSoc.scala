@@ -40,7 +40,8 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
     val vpuParam = VpuCfuParameter(
       vlen = p.MiCoVpuLen, 
       maclen = p.MiCoVpuWidth,
-      xlen = p.MiCoVpuBusWidth)
+      xlen = p.MiCoVpuBusWidth,
+      noWaitCompute = p.MiCoVpuStress)
 
     val cfuConnect = p.vexii.withCfu generate (Fiber patch new Area {
       val cpuCfuBus = cpu.logic.core.host[CfuPlugin].logic.bus
@@ -80,19 +81,20 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
     if(memBus == null) memBus = mainBus // No L2, no Hub, the CPU is directly connected to the memory bus
     memBus.forceDataWidth(p.vexii.memDataWidth)
 
-    val mBus = new SlaveBus(
-      M2sSupport(
-        transfers = M2sTransfers.all,
-        dataWidth = 32,
-        addressWidth = 32
-      ),
-      S2mParameters(Nil)
-    )
-    mBus.node at SizeMapping(0x80000000l, 0x80000000l) of memBus
-    mBus.node.addTags(PMA.MAIN, PMA.EXECUTABLE)
+    // val mBus = new SlaveBus(
+      // M2sSupport(
+        // transfers = M2sTransfers.all,
+        // dataWidth = 32,
+        // addressWidth = 32
+      // ),
+      // S2mParameters(Nil)
+    // )
+    // mBus.node at SizeMapping(0x80000000l, 0x80000000l) of memBus
+    // mBus.node.addTags(PMA.MAIN, PMA.EXECUTABLE)
 
     val ram = new tilelink.fabric.RamFiber(p.ramBytes)
-    ram.up at 0x40000000l of memBus
+    ram.up at 0x80000000l of memBus
+    // ram.up at 0x40000000l of memBus
 
     // Handle all the IO / Peripheral things
     val peripheral = new Area {

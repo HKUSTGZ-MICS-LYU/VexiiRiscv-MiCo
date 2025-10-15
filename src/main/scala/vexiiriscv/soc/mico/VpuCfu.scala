@@ -55,7 +55,7 @@ case class VpuCfuParameter(
   var xlen : Int = 64,
   var maclen : Int = 32,
   var vregs : Int = 2,
-  var noWaitCompute : Boolean = true
+  var noWaitCompute : Boolean = false
 ){
     def pendingSize = vlen / xlen
 }
