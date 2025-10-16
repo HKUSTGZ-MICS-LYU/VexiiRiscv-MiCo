@@ -1,4 +1,25 @@
 sbt "runMain vexiiriscv.soc.mico.MiCoSocSim \
     --load-elf $1 \
-    --regfile-async --allow-bypass-from=0 \
-    --with-rvm --with-rvc --fetch-l1 --lsu-l1"
+    --with-rvc \
+    --with-rvf \
+    --with-rvm \
+    --decoders 2 \
+    --lanes 2 \
+    --with-aligner-buffer \
+    --with-dispatcher-buffer \
+    --with-ras \
+    --with-btb \
+    --with-gshare \
+    --with-late-alu \
+    --regfile-async \
+    --lsu-l1 \
+    --lsu-l1-ways 2 \
+    --fetch-l1 \
+    --fetch-l1-ways 2 \
+    --allow-bypass-from 0 \
+    --div-radix 4 \
+    --ram-bytes 10000000 \
+    --mico-vpu \
+    --mico-vpu-len 256 \
+    --mico-vpu-width 256 \
+    --mico-vpu-bus-width 64"

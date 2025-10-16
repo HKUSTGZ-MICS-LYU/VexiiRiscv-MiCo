@@ -82,12 +82,12 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
     memBus.forceDataWidth(p.vexii.memDataWidth)
 
     // val mBus = new SlaveBus(
-      // M2sSupport(
-        // transfers = M2sTransfers.all,
-        // dataWidth = 32,
-        // addressWidth = 32
-      // ),
-      // S2mParameters(Nil)
+    //   M2sSupport(
+    //     transfers = M2sTransfers.all,
+    //     dataWidth = 32,
+    //     addressWidth = 32
+    //   ),
+    //   S2mParameters(Nil)
     // )
     // mBus.node at SizeMapping(0x80000000l, 0x80000000l) of memBus
     // mBus.node.addTags(PMA.MAIN, PMA.EXECUTABLE)

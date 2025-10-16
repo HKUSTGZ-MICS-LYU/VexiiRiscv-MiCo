@@ -55,7 +55,10 @@ object MiCoSocGen extends App{
   }.parse(args, ()).nonEmpty)
   p.legalize()
 
-  val report = SpinalVerilog(new MiCoSoc(p))
+    
+  val report = SpinalConfig()
+    // .addStandardMemBlackboxing(blackboxAll)
+    .generateVerilog(new MiCoSoc(p))
 
   Bsp(new File("."), report.toplevel.system.cpu)
 }
