@@ -24,10 +24,10 @@ class MiCoSA(config : MiCoSAConfig) extends Component {
         val a_inputs = in(Vec(SInt(dataWidth bits), size))
         val b_inputs = in(Vec(SInt(dataWidth bits), size))
         val results = out(Vec(SInt(accWidth bits), size))
-        val enable = in(Bool()) default(True)
-        val input_zero = in(Bool()) default(False)
-        val propagate = in(Bool()) default(False)
-        val clear = in(Bool()) default(False)
+        val enable = in(Bool())
+        val input_zero = in(Bool())
+        val propagate = in(Bool())
+        val clear = in(Bool()) 
     }
 
     // Create 2D array of PEs
@@ -40,11 +40,11 @@ class MiCoSA(config : MiCoSAConfig) extends Component {
         pe.io.clear := io.clear
         pe.io.propagate := io.propagate
         
-        val a_val = io.input_zero.mux(S(0), io.a_inputs(j))
-        val b_val = io.input_zero.mux(S(0), io.b_inputs(i))
+        val a_val = io.input_zero.mux(S(0, dataWidth bits), io.a_inputs(j))
+        val b_val = io.input_zero.mux(S(0, dataWidth bits), io.b_inputs(i))
 
-        val a = Delay(a_val, j)
-        val b = Delay(b_val, i)
+        val a = Delay(a_val, j, init = S(0, dataWidth bits), when = io.enable)
+        val b = Delay(b_val, i, init = S(0, dataWidth bits), when = io.enable)
         
         // Connect inputs using pattern matching on indices
         pe.io.in_a := (if (i == 0) a else pes(i - 1)(j).io.out_a)
@@ -59,7 +59,7 @@ class MiCoSA(config : MiCoSAConfig) extends Component {
 
 object SimulateSA extends App {
 
-    val config = MiCoSAConfig(size = 2, dataWidth = 8, accWidth = 32)
+    val config = MiCoSAConfig(size = 32, dataWidth = 8, accWidth = 32)
     val N = config.size
 
     // Deterministic matrices:
@@ -96,13 +96,24 @@ object SimulateSA extends App {
       println("------------------------------------")
 
       // Initialize controls
-      dut.io.enable #= true
+      dut.io.enable #= false
       dut.io.propagate #= false
-      dut.io.input_zero #= true
+      dut.io.clear #= false
+      dut.io.input_zero #= false
+      for (i <- 0 until N) {
+        dut.io.a_inputs(i) #= 0
+        dut.io.b_inputs(i) #= 0
+      }
+
+      dut.clockDomain.assertReset()
+      dut.clockDomain.waitRisingEdge(1)
+      dut.clockDomain.deassertReset()
 
       // Clear accumulators
       dut.io.clear #= true
       dut.clockDomain.waitRisingEdge(1)
+
+      // Cleaning phase
       dut.io.clear #= false
 
       def dumpRes(tag: String = ""): Unit = {
@@ -113,6 +124,7 @@ object SimulateSA extends App {
         println("--------------------")
       }
 
+      dut.io.enable #= true
       dut.io.input_zero #= false
       val feedCycles = N
       for (t <- 0 until feedCycles) {
@@ -128,10 +140,21 @@ object SimulateSA extends App {
         dumpRes(s"After feed cycle t=$t")
       }
       dut.io.input_zero #= true
-      // Do Computation cycles
-      dut.clockDomain.waitRisingEdge(N)    
+      dut.clockDomain.waitRisingEdge(2*N-2)
+      dumpRes("After Computation Phase")
 
+      // Start Propagation Phase
+      dut.io.propagate #= true
+      dut.clockDomain.waitRisingEdge(1)
       val resultArray = Array.ofDim[Int](N, N)
+      for (t <- 0 until N) {
+        // Capture results
+        dumpRes(s"After propagate cycle t=$t")
+        for (i <- 0 until N) {
+          resultArray(t)(i) = dut.io.results(i).toInt
+        }
+        dut.clockDomain.waitRisingEdge(1)
+      }
 
       println("\n==== Final Results Comparison ====")
       var allMatch = true

@@ -51,15 +51,15 @@ class MiCoPE(config : MiCoSAConfig) extends Component {
     val reg_b = Reg(SInt(dataWidth bits)) init(0)
     val acc = Reg(SInt(accWidth bits)) init(0)
     val mac = acc + (io.in_a * io.in_b).resized
-    when(io.enable) {
+    
+    when(io.clear) {
+        acc := 0
+        reg_a := 0
+        reg_b := 0
+    } elsewhen (io.enable) {
         reg_a := io.in_a
         reg_b := io.in_b
-        
-        when(io.clear) {
-            acc := 0
-            reg_a := 0
-            reg_b := 0
-        } elsewhen(io.propagate) {
+        when(io.propagate) {
             acc := io.in_res
         } otherwise {
             acc := mac
