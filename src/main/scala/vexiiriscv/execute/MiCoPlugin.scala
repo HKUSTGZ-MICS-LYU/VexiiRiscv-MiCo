@@ -69,7 +69,7 @@ object MiCoCompute extends AreaObject {
     def DotProductSym1Bit(op_a : Bits, op_b : Bits) : SInt = {
         val xor = (op_a ^ op_b).asBools
         val count_n = xor.sCount(True)         // True is -1
-        (S(op_a.getWidth) - (count_n << 1).asSInt).resize(32)
+        (S(op_a.getWidth) - (count_n << 1).asSInt).resize(Riscv.XLEN.get)
     }
 
     def Extend1bTo2b(op : Bits) : Bits = {
