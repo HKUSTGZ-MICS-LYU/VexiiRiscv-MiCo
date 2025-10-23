@@ -18,6 +18,7 @@ class MiCoWoSA(config : MiCoWoSAConfig) extends Component {
         val a_inputs = in(Vec(SInt(dataWidth bits), size))
         val w_inputs = in(Vec(SInt(dataWidth bits), size))
         val w_load = in(Bool())
+        val mode = in(Bool()) // false: int8, true: int4
         val w_sel = in(UInt(log2Up(size) bits))
         val results = out(Vec(SInt(accWidth bits), size))
         val enable = in(Bool())
@@ -31,8 +32,10 @@ class MiCoWoSA(config : MiCoWoSAConfig) extends Component {
     for (i <- 0 until size; j <- 0 until size) {
         val pe = pes(i)(j)
 
+        // Broadcast control signals
         pe.io.enable := io.enable
         pe.io.clear := io.clear
+        pe.io.mode := io.mode
         
         val a_val = io.input_zero.mux(S(0, dataWidth bits), io.a_inputs(j))
         val a = Delay(a_val, j, init = S(0, dataWidth bits), when = io.enable)
@@ -94,6 +97,7 @@ object SimulateSA extends App {
       dut.io.input_zero #= false
       dut.io.w_load #= false
       dut.io.w_sel #= 0
+      dut.io.mode #= false // int8 mode
       for (i <- 0 until N) {
         dut.io.a_inputs(i) #= 0
         dut.io.w_inputs(i) #= 0
