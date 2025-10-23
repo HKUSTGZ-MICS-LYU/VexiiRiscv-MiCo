@@ -18,13 +18,13 @@ object VectorDotCompute extends AreaObject {
         val a_vec = op_a.subdivideIn(elen bits)
         val b_vec = op_b.subdivideIn(elen bits)
         val a_tmp = Vec(a_vec.zip(b_vec).map{case (a_i, b_i) => a_i.asSInt * b_i.asSInt})
-        a_tmp.reduceBalancedTree(_ +^ _).resize(32)
+        a_tmp.reduceBalancedTree(_ +^ _).resized
     }
 
     def DotProductSym1Bit(op_a : Bits, op_b : Bits) : SInt = {
         val xor = (op_a ^ op_b).asBools
         val count_n = xor.sCount(True)         // True is -1
-        (S(op_a.getWidth) - (count_n << 1).asSInt).resize(32)
+        (S(op_a.getWidth) - (count_n << 1).asSInt).resized
     }
 
     def Extend1bTo2b(op : Bits) : Bits = {
@@ -73,6 +73,8 @@ class VpuCfu(cfuParam: CfuBusParameter,
     val vregsLog2 = log2Up(vregs)
     val nLoad = vlen / xlen
     val nCompute = vlen / maclen
+    val reslen = cfuParam.CFU_OUTPUT_DATA_W
+
 
     val io = new Bundle {
         val bus = slave(CfuBus(cfuParam))         // Linking CPU
@@ -179,14 +181,14 @@ class VpuCfu(cfuParam: CfuBusParameter,
         val opbDot1 = opb_d1
     
         // Compute
-        val acc = Reg(SInt(32 bits)) init(0)
+        val acc = Reg(SInt(reslen bits)) init(0)
         val sel = Bool()
 
         val done = p.noWaitCompute.mux(
             RegNext(shared_offset === (vlen - maclen)), 
             shared_offset === (vlen - maclen))
 
-        val partial = SInt(32 bits)
+        val partial = SInt(reslen bits)
         val res = acc + partial
 
         sel := False // Default Unsel
@@ -196,7 +198,7 @@ class VpuCfu(cfuParam: CfuBusParameter,
             U(4) -> DotProduct(opa, opbDot4, 4),
             U(2) -> DotProduct(opa, opbDot2, 2),
             U(1) -> DotProductSym1Bit(opa, opbDot1),
-            default -> S(0, 32 bits)
+            default -> S(0, reslen bits)
         )
 
 
@@ -284,7 +286,7 @@ class VpuCfu(cfuParam: CfuBusParameter,
 
         // Loading State
         LOAD.onEntry {
-            baseAddr := io.bus.cmd.inputs(0).asUInt
+            baseAddr := io.bus.cmd.inputs(0).asUInt.resized
             LoadRD := io.bus.cmd.raw_insn(24 downto 20).resize(vregsLog2).asUInt // rd = rs2
             offsetAddr := 0
             memFireId := 0

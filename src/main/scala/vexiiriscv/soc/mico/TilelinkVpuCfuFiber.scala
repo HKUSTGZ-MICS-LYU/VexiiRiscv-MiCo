@@ -41,16 +41,16 @@ object TilelinkVpuCfuFiber {
         )
       )
   
-  def getCfuBusParameters = CfuBusParameter(
+  def getCfuBusParameters(xlen: Int = 32) = CfuBusParameter(
         CFU_VERSION = 0,
         CFU_INTERFACE_ID_W = 0,
         CFU_FUNCTION_ID_W = 3,
         CFU_REORDER_ID_W = 0,
         CFU_REQ_RESP_ID_W = 0,
         CFU_INPUTS = 2,
-        CFU_INPUT_DATA_W = 32,
+        CFU_INPUT_DATA_W = xlen,
         CFU_OUTPUTS = 1,
-        CFU_OUTPUT_DATA_W = 32,
+        CFU_OUTPUT_DATA_W = xlen,
         CFU_FLOW_REQ_READY_ALWAYS = false,
         CFU_FLOW_RESP_READY_ALWAYS = false,
         CFU_WITH_STATUS = true,
@@ -60,7 +60,7 @@ object TilelinkVpuCfuFiber {
       )
 }
 
-class TilelinkVpuCfuFiber(vpuParam: VpuCfuParameter) extends Area {
+class TilelinkVpuCfuFiber(vpuParam: VpuCfuParameter, xlen: Int) extends Area {
 
   import TilelinkVpuCfuFiber._
 
@@ -75,7 +75,7 @@ class TilelinkVpuCfuFiber(vpuParam: VpuCfuParameter) extends Area {
       )
       bus.s2m.supported load tilelink.S2mSupport.none()
 
-      val cfuParam = getCfuBusParameters
+      val cfuParam = getCfuBusParameters(xlen)
 
       val cfuBus = CfuBus(cfuParam)
       val cfu = new VpuCfu(cfuParam, dBus.p, vpuParam)

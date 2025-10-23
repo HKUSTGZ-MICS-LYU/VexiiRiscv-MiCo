@@ -49,7 +49,7 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
       cfuCfuBus << cpuCfuBus
     })
 
-    val cfu = p.useMiCoVpu generate new TilelinkVpuCfuFiber(vpuParam){
+    val cfu = p.useMiCoVpu generate new TilelinkVpuCfuFiber(vpuParam, p.vexii.xlen) {
       mainBus << bus
       bus.setDownConnection(a = StreamPipe.S2M)
     }
