@@ -14,3 +14,6 @@
 [submodule "ext/SpinalHDL"]
 	path = ext/SpinalHDL
 	url = https://github.com/SpinalHDL/SpinalHDL.git
+[submodule "MiCoSocSW"]
+	path = MiCoSocSW
+	url = git@github.com:HKUSTGZ-MICS-LYU/MiCoSocSW.git
