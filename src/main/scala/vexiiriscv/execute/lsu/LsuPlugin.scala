@@ -450,6 +450,8 @@ class LsuPlugin(var layer : LaneLayer,
         port.invalidate := False
         port.op := LsuL1CmdOpcode.ACCESS
         port.storeId := 0
+
+        host[DispatchPlugin].haltDispatchWhen(sbWaiter)
       }
 
       // Accesses comming from the TrapPlugin (ex : fence.i)
@@ -524,6 +526,9 @@ class LsuPlugin(var layer : LaneLayer,
       FROM_WB := arbiter.io.output.op === LsuL1CmdOpcode.STORE_BUFFER
       FROM_LSU := arbiter.io.output.op === LsuL1CmdOpcode.LSU
       FROM_PREFETCH := arbiter.io.output.op === LsuL1CmdOpcode.PREFETCH
+      when(!FROM_LSU){
+        bypass(FENCE) := False
+      }
       if(withStoreBuffer) SB_PTR := storeBuffer.pop.ptr
       val SB_DATA = withStoreBuffer generate insert(storeBuffer.pop.op.data)
       val STORE_BUFFER_EMPTY = withStoreBuffer generate insert(storeBuffer.empty)
