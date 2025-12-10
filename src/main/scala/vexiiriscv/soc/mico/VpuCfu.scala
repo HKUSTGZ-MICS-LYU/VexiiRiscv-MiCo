@@ -61,6 +61,7 @@ case class VpuCfuParameter(
   var computePipe : Boolean = true
 ){
     def pendingSize = vlen / xlen
+    def singleCycle = noWaitCompute && (vlen == maclen) && !computePipe
 }
 
 class VpuCfu(cfuParam: CfuBusParameter, 
@@ -335,7 +336,7 @@ class VpuCfu(cfuParam: CfuBusParameter,
                 when(isVDot) {
                     if(p.noWaitCompute){
                         compute.sel := True
-                        if(nCompute == 1 && !p.computePipe) {
+                        if(singleCycle) {
                             io.bus.rsp.valid := True
                             io.bus.rsp.outputs(0) := compute.res.asBits
                         } else {
