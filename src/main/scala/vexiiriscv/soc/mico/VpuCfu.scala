@@ -55,7 +55,8 @@ case class VpuCfuParameter(
   var xlen : Int = 64,
   var maclen : Int = 32,
   var vregs : Int = 2,
-  var noWaitCompute : Boolean = false
+  var noWaitCompute : Boolean = false,
+  var rfRam : Boolean = true
 ){
     def pendingSize = vlen / xlen
 }
@@ -84,8 +85,48 @@ class VpuCfu(cfuParam: CfuBusParameter,
     import VectorDotCompute._
     val func3 = io.bus.cmd.function_id.asBits
 
-    // Vector Register File (TODO: Full FF implementation is not efficient!)
-    val vectorRegs = Vec(Reg(Bits(vlen bits)) init(0), vregs)
+    // Vector Register File
+    val vectorRegsReg = Vec(Reg(Bits(vlen bits)) init(0), vregs)
+    val vectorRegsBank = p.rfRam generate new Area {
+        val banks = Seq.fill(nLoad)(
+            Mem(Bits(xlen bits), wordCount = vregs)
+        )
+        val wdata = Bits(xlen bits)
+        val wen = Vec.fill(nLoad)(Bool())
+        val waddr = UInt(vregsLog2 bits)
+
+        // Defaults
+        wdata := 0
+        wen.foreach(_ := False)
+        waddr := 0
+
+        for(i <- 0 until nLoad){
+            banks(i).write(
+                address = waddr,
+                data = wdata,
+                enable = wen(i)
+            )
+        }
+    }
+
+    def vectorRead(addr: UInt): Bits = {
+        if (p.rfRam){
+            val reads = vectorRegsBank.banks.map(_.readAsync(addr))
+            reads.reverse.reduce(_ ## _)
+        } else {
+            vectorRegsReg(addr)
+        }
+    }
+    def vectorWrite(addr: UInt, index: UInt, data: Bits): Unit = {
+        if (p.rfRam){
+            vectorRegsBank.waddr := addr
+            vectorRegsBank.wdata := data
+            vectorRegsBank.wen(index) := True
+        } else {
+            val offset = index.resized << log2Up(xlen)
+            vectorRegsReg(addr)(offset, xlen bits) := data
+        }
+    }
 
     val isLoad   = func3 === B"100"
     val isConfig = func3 === B"010"
@@ -145,8 +186,8 @@ class VpuCfu(cfuParam: CfuBusParameter,
             RS2 := decode.RS2
         }
         val isFirst = p.noWaitCompute.mux(rs1_offset === 0, False)
-        val rs1 = isFirst.mux(vectorRegs(decode.RS1), vectorRegs(RS1))
-        val rs2 = isFirst.mux(vectorRegs(decode.RS2), vectorRegs(RS2))
+        val rs1 = vectorRead(isFirst.mux(decode.RS1, RS1))
+        val rs2 = vectorRead(isFirst.mux(decode.RS2, RS2))
     }
 
     val compute = new Area {
@@ -306,8 +347,9 @@ class VpuCfu(cfuParam: CfuBusParameter,
                     goto(IDLE)
                 }
                 loadVecHits(io.dBus.d.source) := True
-                val loadVecOffset = io.dBus.d.source.resized << log2Up(xlen)
-                vectorRegs(LoadRD)(loadVecOffset, xlen bits) := io.dBus.d.data
+                val loadIndex = io.dBus.d.source
+                val loadData = io.dBus.d.data
+                vectorWrite(LoadRD, loadIndex, loadData)
             }
         }
         LOAD.onExit {
