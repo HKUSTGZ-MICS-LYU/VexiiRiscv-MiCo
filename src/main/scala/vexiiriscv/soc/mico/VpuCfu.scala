@@ -109,8 +109,8 @@ class VpuCfu(cfuParam: CfuBusParameter,
 
     val LoadRD = Reg(UInt(vregsLog2 bits)) init(0)
 
-    val shared_offset = Reg(UInt(vlenLog2 bits)) init(0)
-    val sub_offset = Reg(UInt(vlenLog2 bits)) init(0)
+    val rs1_offset = Reg(UInt(vlenLog2 bits)) init(0)
+    val rs2_offset = Reg(UInt(vlenLog2 bits)) init(0)
     
     val config = new Area {
         val qa = Reg(UInt(4 bits)) init(8) // Element width for vector register 8/4/2/1 bits
@@ -144,21 +144,21 @@ class VpuCfu(cfuParam: CfuBusParameter,
             RS1 := decode.RS1
             RS2 := decode.RS2
         }
-        val isFirst = p.noWaitCompute.mux(shared_offset === 0, False)
+        val isFirst = p.noWaitCompute.mux(rs1_offset === 0, False)
         val rs1 = isFirst.mux(vectorRegs(decode.RS1), vectorRegs(RS1))
         val rs2 = isFirst.mux(vectorRegs(decode.RS2), vectorRegs(RS2))
     }
 
     val compute = new Area {
 
-        val opa = rfRead.rs1(shared_offset, maclen bits)
-        val opb = rfRead.rs2(shared_offset, maclen bits)
+        val opa = rfRead.rs1(rs1_offset, maclen bits)
+        val opb = rfRead.rs2
         
         // Extract
-        val opb_d1 = opb(sub_offset, maclen bits)
-        val opb_d2 = opb(sub_offset, maclen / 2 bits)
-        val opb_d4 = opb(sub_offset, maclen / 4 bits)
-        val opb_d8 = opb(sub_offset, maclen / 8 bits)
+        val opb_d1 = opb(rs2_offset, maclen bits)
+        val opb_d2 = opb(rs2_offset, maclen / 2 bits)
+        val opb_d4 = opb(rs2_offset, maclen / 4 bits)
+        val opb_d8 = opb(rs2_offset, maclen / 8 bits)
 
         val opbDot8 = config.qb.mux(
             U(8) -> opb_d1,
@@ -184,10 +184,7 @@ class VpuCfu(cfuParam: CfuBusParameter,
         val acc = Reg(SInt(reslen bits)) init(0)
         val sel = Bool()
 
-        val done = p.noWaitCompute.mux(
-            shared_offset === (vlen - maclen), 
-            RegNext(shared_offset === (vlen - maclen)))
-
+        val done = (rs1_offset === (vlen - maclen)) && sel
         val partial = SInt(reslen bits)
         val res = acc + partial
 
@@ -201,14 +198,12 @@ class VpuCfu(cfuParam: CfuBusParameter,
             default -> S(0, reslen bits)
         )
 
-
         when(sel){
-            shared_offset := shared_offset + offset_max
-            sub_offset := sub_offset + config.inc
+            rs1_offset := rs1_offset + offset_max
+            rs2_offset := rs2_offset + config.inc
             if(nCompute != 1) acc := res
         }
     }
-
 
     val baseAddr = Reg(UInt(32 bits)) init(0)
     val offsetAddr = Reg(UInt(32 bits)) init(0)
@@ -254,10 +249,10 @@ class VpuCfu(cfuParam: CfuBusParameter,
                         if(nCompute == 1) {
                             io.bus.rsp.valid := True
                             io.bus.rsp.outputs(0) := compute.res.asBits
-                        } else{
+                        } else {
                             goto(VDOTP)
                         }
-                    }else{
+                    } else {
                         goto(VDOTP)
                     }
                 }
@@ -267,8 +262,8 @@ class VpuCfu(cfuParam: CfuBusParameter,
                     config.qa := decode.QA
                     config.qb := decode.QB
                     // Clear Compute
-                    shared_offset := 0
-                    sub_offset := 0
+                    rs1_offset := 0
+                    rs2_offset := 0
                     compute.acc := 0
                 }
             }
