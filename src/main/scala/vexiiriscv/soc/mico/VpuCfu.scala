@@ -336,7 +336,7 @@ class VpuCfu(cfuParam: CfuBusParameter,
                 when(isVDot) {
                     if(p.noWaitCompute){
                         compute.sel := True
-                        if(singleCycle) {
+                        if(p.singleCycle) {
                             io.bus.rsp.valid := True
                             io.bus.rsp.outputs(0) := compute.res.asBits
                         } else {
