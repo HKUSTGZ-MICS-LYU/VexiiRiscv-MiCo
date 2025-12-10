@@ -185,8 +185,8 @@ class VpuCfu(cfuParam: CfuBusParameter,
         val sel = Bool()
 
         val done = p.noWaitCompute.mux(
-            RegNext(shared_offset === (vlen - maclen)), 
-            shared_offset === (vlen - maclen))
+            shared_offset === (vlen - maclen), 
+            RegNext(shared_offset === (vlen - maclen)))
 
         val partial = SInt(reslen bits)
         val res = acc + partial
