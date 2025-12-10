@@ -26,7 +26,7 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
   // socCtrl will provide clocking, reset controllers and debugModule (through jtag) to our SoC
   val socCtrl = new SocCtrl(p.socCtrl)
 
-  val system = new ClockingArea(socCtrl.system.cd) {
+    val system = new ClockingArea(socCtrl.system.cd) {
     // Let's define our main tilelink bus on which the CPU, RAM and peripheral "portal" will be plugged later.
     val mainBus = tilelink.fabric.Node()
     val ioBus = tilelink.fabric.Node()
@@ -41,7 +41,8 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
       vlen = p.MiCoVpuLen, 
       maclen = p.MiCoVpuWidth,
       xlen = p.MiCoVpuBusWidth,
-      noWaitCompute = p.MiCoVpuStress)
+      noWaitCompute = p.MiCoVpuStress,
+      computePipe = p.MiCoVpuPipe)
 
     val cfuConnect = p.vexii.withCfu generate (Fiber patch new Area {
       val cpuCfuBus = cpu.logic.core.host[CfuPlugin].logic.bus

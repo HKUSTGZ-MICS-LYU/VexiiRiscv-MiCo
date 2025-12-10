@@ -8,6 +8,7 @@ import spinal.lib.bus._
 import spinal.lib.bus.misc._
 import spinal.lib.bus.tilelink._
 import spinal.lib.misc._
+import spinal.lib.misc.pipeline._
 
 
 import vexiiriscv.execute.cfu._
@@ -56,7 +57,8 @@ case class VpuCfuParameter(
   var maclen : Int = 32,
   var vregs : Int = 2,
   var noWaitCompute : Boolean = false,
-  var rfRam : Boolean = true
+  var rfRam : Boolean = true,
+  var computePipe : Boolean = true
 ){
     def pendingSize = vlen / xlen
 }
@@ -192,57 +194,103 @@ class VpuCfu(cfuParam: CfuBusParameter,
 
     val compute = new Area {
 
-        val opa = rfRead.rs1(rs1_offset, maclen bits)
-        val opb = rfRead.rs2
-        
-        // Extract
-        val opb_d1 = opb(rs2_offset, maclen bits)
-        val opb_d2 = opb(rs2_offset, maclen / 2 bits)
-        val opb_d4 = opb(rs2_offset, maclen / 4 bits)
-        val opb_d8 = opb(rs2_offset, maclen / 8 bits)
-
-        val opbDot8 = config.qb.mux(
-            U(8) -> opb_d1,
-            U(4) -> ExtendTo8b(opb_d2, 4),
-            U(2) -> ExtendTo8b(opb_d4, 2),
-            U(1) -> ExtendTo8b(Extend1bTo2b(opb_d8), 2),
-            default -> B(0, maclen bits)
-        )
-        val opbDot4 = config.qb.mux(
-            U(4) -> opb_d1,
-            U(2) -> Extend2bTo4b(opb_d2),
-            U(1) -> Extend2bTo4b(Extend1bTo2b(opb_d4)),
-            default -> B(0, maclen bits)
-        )
-        val opbDot2 = config.qb.mux(
-            U(2) -> opb_d1,
-            U(1) -> Extend1bTo2b(opb_d2),
-            default -> B(0, maclen bits)
-        )
-        val opbDot1 = opb_d1
-    
-        // Compute
+        // Global Signals
         val acc = Reg(SInt(reslen bits)) init(0)
         val sel = Bool()
-
-        val done = (rs1_offset === (vlen - maclen)) && sel
-        val partial = SInt(reslen bits)
-        val res = acc + partial
+        val doneNow = (rs1_offset === (vlen - maclen)) && sel
 
         sel := False // Default Unsel
 
-        partial := config.qa.mux(
-            U(8) -> DotProduct(opa, opbDot8, 8),
-            U(4) -> DotProduct(opa, opbDot4, 4),
-            U(2) -> DotProduct(opa, opbDot2, 2),
-            U(1) -> DotProductSym1Bit(opa, opbDot1),
-            default -> S(0, reslen bits)
-        )
+        // Pipeline Nodes
+        val usePipe = p.computePipe
+        val nStages = if(usePipe) 1 else 0
+        
+        val stages = Array.fill(nStages + 1)(Node())
 
+        val extractStage = stages(0)
+        val computeStage = stages(nStages)
+
+        // Offset Shift
         when(sel){
             rs1_offset := rs1_offset + offset_max
             rs2_offset := rs2_offset + config.inc
-            if(nCompute != 1) acc := res
+        }
+
+        val SEL = Payload(Bool())
+        val DONE = Payload(Bool())
+        val OPA = Payload(Bits(maclen bits))
+        val OPB = Payload(Bits(maclen bits))
+
+        // Extract Stage
+        val extract = new extractStage.Area {
+            val opa = rfRead.rs1(rs1_offset, maclen bits)
+            val opb = rfRead.rs2
+            val opb_d1 = opb(rs2_offset, maclen bits)
+            val opb_d2 = opb(rs2_offset, maclen / 2 bits)
+            val opb_d4 = opb(rs2_offset, maclen / 4 bits)
+            val opb_d8 = opb(rs2_offset, maclen / 8 bits)
+
+            val opbDot8 = config.qb.mux(
+                U(8) -> opb_d1,
+                U(4) -> ExtendTo8b(opb_d2, 4),
+                U(2) -> ExtendTo8b(opb_d4, 2),
+                U(1) -> ExtendTo8b(Extend1bTo2b(opb_d8), 2),
+                default -> B(0, maclen bits)
+            )
+            val opbDot4 = config.qb.mux(
+                U(4) -> opb_d1,
+                U(2) -> Extend2bTo4b(opb_d2),
+                U(1) -> Extend2bTo4b(Extend1bTo2b(opb_d4)),
+                default -> B(0, maclen bits)
+            )
+            val opbDot2 = config.qb.mux(
+                U(2) -> opb_d1,
+                U(1) -> Extend1bTo2b(opb_d2),
+                default -> B(0, maclen bits)
+            )
+            val opbDot1 = opb_d1
+            val opbExtract = config.qa.mux(
+                U(8) -> opbDot8,
+                U(4) -> opbDot4,
+                U(2) -> opbDot2,
+                U(1) -> opbDot1,
+                default -> B(0, maclen bits)
+            )
+
+            // Pipeline Signals
+            SEL := sel
+            DONE := doneNow
+            OPA := opa
+            OPB := opbExtract
+        }
+
+        val dotproduct = new computeStage.Area {
+            val partial = SInt(reslen bits)
+            val res = acc + partial
+
+            val opaStage = OPA
+            val opbStage = OPB
+            val doAcc = SEL
+
+            partial := config.qa.mux(
+                U(8) -> DotProduct(opaStage, opbStage, 8),
+                U(4) -> DotProduct(opaStage, opbStage, 4),
+                U(2) -> DotProduct(opaStage, opbStage, 2),
+                U(1) -> DotProductSym1Bit(opaStage, opbStage),
+                default -> S(0, reslen bits)
+            )
+            when(doAcc){
+                if(nCompute != 1) acc := res
+            }
+        }
+
+        val res = dotproduct.res
+        val done = computeStage(DONE)
+
+        // Pipeline Stages
+        if (usePipe){
+            val links = for (i <- 0 to nStages - 1) yield StageLink(stages(i), stages(i + 1))
+            Builder(links)
         }
     }
 
@@ -287,7 +335,7 @@ class VpuCfu(cfuParam: CfuBusParameter,
                 when(isVDot) {
                     if(p.noWaitCompute){
                         compute.sel := True
-                        if(nCompute == 1) {
+                        if(nCompute == 1 && !p.computePipe) {
                             io.bus.rsp.valid := True
                             io.bus.rsp.outputs(0) := compute.res.asBits
                         } else {
