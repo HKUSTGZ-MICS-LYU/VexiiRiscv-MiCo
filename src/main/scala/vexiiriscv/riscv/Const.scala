@@ -89,18 +89,26 @@ object CSR {
   def MIDELEG   = 0x303 // MRW Machine interrupt delegation register.
   def MIE       = 0x304 // MRW Machine interrupt-enable register.
   def MTVEC     = 0x305 // MRW Machine trap-handler base address. Machine Trap Handling
+  def MVIEN     = 0x308 // MRW Machine virtual interrupt enables.
+  def MVIP      = 0x309 // MRW Machine virtual interrupt-pending bits.
+  def MIDELEGH  = 0x313 // MRW Upper 32 bits of mideleg, RV32I only.
+  def MIEH      = 0x314 // Upper 32 bits of mie, RV32I only.
+  def MVIENH    = 0x318 // Upper 32 bits of mvien, RV32I only.
+  def MVIPH     = 0x319 // Upper 32 bits of mvip, RV32I only.
   def MSCRATCH  = 0x340 // MRW Scratch register for machine trap handlers.
   def MEPC      = 0x341 // MRW Machine exception program counter.
   def MCAUSE    = 0x342 // MRW Machine trap cause.
   def MTVAL     = 0x343 // MRW Machine bad address.
   def MIP       = 0x344 // MRW Machine interrupt pending.
+  def MIPH      = 0x354 // Upper 32 bits of mip, RV32I only.
   def MISELECT  = 0x350 // MRW Machine indirect register select.
   def MIREG     = 0x351 // MRW Machine indirect register alias.
   def MIREG2    = 0x352 // MRW Machine indirect register alias 2.
   def MIREG3    = 0x353 // MRW Machine indirect register alias 3.
-  def MIREG4    = 0x354 // MRW Machine indirect register alias 4.
-  def MIREG5    = 0x355 // MRW Machine indirect register alias 5.
-  def MIREG6    = 0x356 // MRW Machine indirect register alias 6.
+  def MIREG4    = 0x355 // MRW Machine indirect register alias 4.
+  def MIREG5    = 0x356 // MRW Machine indirect register alias 5.
+  def MIREG6    = 0x357 // MRW Machine indirect register alias 6.
+  def MTOPEI    = 0x35C // MRW Machine top external interrupt.
   def MENVCFG   = 0x30A // MRW Machine environment configuration register.
   def MENVCFGH  = 0x31A // MRW Machine environment configuration register.
   def MBASE     = 0x380 // MRW Base register.
@@ -144,6 +152,7 @@ object CSR {
   val SIREG4      = 0x154
   val SIREG5      = 0x155
   val SIREG6      = 0x156
+  val STOPEI      = 0x15C
   val STIMECMPH   = 0x15D
   val SATP        = 0x180
   val SCOUNTOVF   = 0xDA0
@@ -188,4 +197,11 @@ object InterruptInfo {
     10, 2, 6,   // VS interrupts: external, software, timer
     13          // Local interrupt: counter overflow
   )
+}
+
+object IndirectCSR{
+  val eidelivery  = 0x70
+  val eithreshold = 0x72
+  val eip0        = 0x80
+  val eie0        = 0xC0
 }

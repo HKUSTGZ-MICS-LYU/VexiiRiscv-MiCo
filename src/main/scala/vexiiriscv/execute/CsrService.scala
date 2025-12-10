@@ -202,6 +202,10 @@ class CsrHartApi(csrService: CsrService, hartId : Int){
     }
   }
 
+  def onRead(csrFilter : Any, onlyOnFire : Boolean)(body : => Unit) = csrService.onRead(csrFilter, onlyOnFire){
+    when(csrService.writingHartId(hartId)){ body }
+  }
+
   def onWrite(csrFilter : Any, onlyOnFire : Boolean)(body : => Unit) = csrService.onWrite(csrFilter, onlyOnFire){
     when(csrService.writingHartId(hartId)){ body }
   }
@@ -216,7 +220,7 @@ class CsrHartApi(csrService: CsrService, hartId : Int){
     ret
   }
 
-  def writeWhen[T <: Data](value: T, cond: Bool, csrId: Int, bitOffset: Int = 0): Unit = {
+  def writeWhen[T <: Data](value: T, cond: Bool, csrId: Any, bitOffset: Int = 0): Unit = {
     onWrite(csrId, true) {
       when(cond) {
         value.assignFromBits(csrService.bus.write.bits(bitOffset, widthOf(value) bits))

@@ -75,7 +75,7 @@ object MmuSpec{
     virtualWidth   = 39,
     physicalWidth  = 56,
     satpMode   = 8,
-    pteReserved = 0x1FC0000000000000l
+    pteReserved = BigInt("FFC0000000000000", 16)
   )
 }
 
@@ -482,7 +482,7 @@ class MmuPlugin(var spec : MmuSpec,
             o.pf  := pageFault
             o.ae_ptw    := accessFault && !load.leaf
             o.ae_final  := accessFault && load.leaf //Note so sure
-            o.level := levelId
+            o.level := spec.levels.size - 1 - levelId
           }
 
           for((storage, sid) <- storages.zipWithIndex){
