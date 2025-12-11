@@ -211,17 +211,18 @@ class VpuCfu(cfuParam: CfuBusParameter,
         val extractStage = stages(0)
         val computeStage = stages(nStages)
 
-        // Offset Shift
-        when(sel){
-            rs1_offset := rs1_offset + offset_max
-            rs2_offset := rs2_offset + config.inc
-        }
-
         val SEL = Payload(Bool())
         val DONE = Payload(Bool())
         val OPA = Payload(Bits(maclen bits))
         val OPB = Payload(Bits(maclen bits))
 
+        val shift_offset = usePipe.mux( sel && !computeStage(DONE), sel)
+        // Offset Shift
+        when(shift_offset){
+            rs1_offset := rs1_offset + offset_max
+            rs2_offset := rs2_offset + config.inc
+        }
+        
         // Extract Stage
         val extract = new extractStage.Area {
             val opa = rfRead.rs1(rs1_offset, maclen bits)
@@ -282,6 +283,8 @@ class VpuCfu(cfuParam: CfuBusParameter,
             )
             when(doAcc){
                 if(nCompute != 1) acc := res
+            }.otherwise{
+                acc := 0
             }
         }
 
@@ -364,7 +367,6 @@ class VpuCfu(cfuParam: CfuBusParameter,
             when(compute.done){
                 io.bus.rsp.valid := True
                 io.bus.rsp.outputs(0) := compute.res.asBits
-                compute.acc := 0
                 goto(IDLE)
             }
         }
