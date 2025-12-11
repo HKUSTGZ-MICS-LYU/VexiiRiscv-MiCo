@@ -250,7 +250,8 @@ class MiCoPluginV2(val layer : LaneLayer,
         val OPA = Payload(Bits(xlen bits)) // Operand A (RS1)
         val INC = Payload(UInt(xlenLog2 bits)) // Increment Bits (0, 4, 8, 16, 32)
         val RES = Payload(Bits(xlen bits)) // Result of the Dot Product
-        val ToDOTP8, ToDOTP4, ToDOTP2, ToDOTP1 = Payload(Bits(xlen bits))
+        // val ToDOTP8, ToDOTP4, ToDOTP2, ToDOTP1 = Payload(Bits(xlen bits))
+        val TODOTP = Payload(Bits(xlen bits))
 
         //Let's get the hardware interface that we will use to provide the result of our custom instruction
         val wb = newWriteback(ifp, formatAt)
@@ -291,6 +292,7 @@ class MiCoPluginV2(val layer : LaneLayer,
             val rs2d2 = rs2(offset, xlen/2 bits)
             val rs2d4 = rs2(offset, xlen/4 bits)
             val rs2d8 = rs2(offset, xlen/8 bits)
+            val ToDOTP8, ToDOTP4, ToDOTP2, ToDOTP1 = Bits(xlen bits)
 
             ToDOTP8 := WQ.mux(
                 Q8 -> rs2,
@@ -314,9 +316,18 @@ class MiCoPluginV2(val layer : LaneLayer,
                 default -> B(0, xlen bits) // Invalid
             )
 
+            TODOTP := AQ.mux(
+                Q8 -> ToDOTP8,
+                Q4 -> ToDOTP4,
+                Q2 -> ToDOTP2,
+                Q1 -> ToDOTP1
+            )
+
             OPA := rs1
         }
 
+
+        // TODO: To many payloads here, could be optimized with mux, keep 2*xlen bits only
         val PROD8 = Payload(Vec(SInt(16 bits), xlen/8))
         val PROD4 = Payload(Vec(SInt(8 bits), xlen/4))
         val PROD2 = Payload(Vec(SInt(4 bits), xlen/2))
@@ -324,10 +335,10 @@ class MiCoPluginV2(val layer : LaneLayer,
 
         val prod = new el.Execute(prodAt) {
             //Compute the product of the two vectors
-            val prod8 = Product(OPA, ToDOTP8, bitWidth = 8)
-            val prod4 = Product(OPA, ToDOTP4, bitWidth = 4)
-            val prod2 = Product(OPA, ToDOTP2, bitWidth = 2)
-            val prod1 = ProductBin(OPA, ToDOTP1)
+            val prod8 = Product(OPA, TODOTP, bitWidth = 8)
+            val prod4 = Product(OPA, TODOTP, bitWidth = 4)
+            val prod2 = Product(OPA, TODOTP, bitWidth = 2)
+            val prod1 = ProductBin(OPA, TODOTP)
             
             PROD8.zipWithIndex.foreach{case (p, i) =>
                 p := prod8(i)
@@ -364,6 +375,7 @@ class MiCoPluginV2(val layer : LaneLayer,
 
 class MiCoMultiCyclePlugin(
                 val layer : LaneLayer,
+                var staged: Boolean = true,
                 var formatAt : Int = 1,
                 var simdWidth : Int = 32) extends ExecutionUnitElementSimple(layer) {
     
@@ -404,6 +416,19 @@ class MiCoMultiCyclePlugin(
         //This will allow a few other plugins to continue their elaboration (ex : decoder, dispatcher, ...)
         uopRetainer.release()
 
+        // Global Signals 
+        val totalCycles = xlen / simdWidth
+        val singleCycle = totalCycles == 1
+        val offset_inc = if (singleCycle) 0 else simdWidth
+        val cycleCount = if (singleCycle) U(0) else Reg(UInt(log2Up(totalCycles) bits)) init(0)
+        val isLastCycle = cycleCount === (totalCycles - 1)
+
+        // Global Out-of-Pipe Registers
+        val rs1_offset = Reg(UInt(xlenLog2 bits)) init(0)
+        val rs2_offset = Reg(UInt(xlenLog2 bits)) init(0)
+        val acc = Reg(SInt(xlen bits)) init(0) // Accumulator for the Dot Product
+
+        // Pipeline Payloads
         val RES = Payload(Bits(xlen bits)) // Result of the Dot Product
 
         // TODO: This could be pipelined like MiCoPluginV2
@@ -412,12 +437,8 @@ class MiCoMultiCyclePlugin(
             val rs1 = el(IntRegFile, RS1).asBits  // rs1 holds the 1st vector
             val rs2 = el(IntRegFile, RS2).asBits  // rs2 holds the 2nd vector
 
-            val rs1_offset = Reg(UInt(xlenLog2 bits)) init(0)
-            val rs2_offset = Reg(UInt(xlenLog2 bits)) init(0)
-
             val opa = rs1(rs1_offset, simdWidth bits) // rs1 holds the 1st vector
             val opb = rs2(rs2_offset, simdWidth bits) // rs2 holds the 2nd vector
-            val acc = Reg(SInt(xlen bits)) init(0) // Accumulator for the Dot Product
 
             val opb_d1 = opb(0, simdWidth bits)
             val opb_d2 = opb(0, simdWidth / 2 bits)
@@ -443,27 +464,12 @@ class MiCoMultiCyclePlugin(
             )
             val opbDot1 = opb_d1
 
-            // Multi-Cycle Control
-            val request = isValid && SEL
-            
-            // Calculate how many cycles we need based on data width
-            val totalCycles = xlen / simdWidth
-            val singleCycle = totalCycles == 1
-            val offset_inc = if (singleCycle) 0 else simdWidth
-            val cycleCount = if (singleCycle) U(0) else Reg(UInt(log2Up(totalCycles) bits)) init(0)
-            val isLastCycle = cycleCount === (totalCycles - 1)
-
-            // Compute
-            val partial_sum = AQ.mux(
-                Q8 -> DotProduct(opa, opbDot8, bitWidth = 8),
-                Q4 -> DotProduct(opa, opbDot4, bitWidth = 4),
-                Q2 -> DotProduct(opa, opbDot2, bitWidth = 2),
-                Q1 -> DotProductSym1Bit(opa, opbDot1)
+            val opbSel = AQ.mux(
+                Q8 -> opbDot8,
+                Q4 -> opbDot4,
+                Q2 -> opbDot2,
+                Q1 -> opbDot1
             )
-
-            val acc_add = acc + partial_sum
-
-            RES := acc_add.asBits
 
             val rs2_inc = UInt(xlenLog2 bits)
 
@@ -485,21 +491,46 @@ class MiCoMultiCyclePlugin(
                 ),
                 default -> U(offset_inc, xlenLog2 bits)
             )
-            
-            when(request){
+
+            val selected = isValid && SEL
+            val done = isLastCycle && selected
+
+            val opa_dotp = staged.mux(RegNext(opa), opa)
+            val opb_dotp = staged.mux(RegNext(opbSel), opbSel)
+            val done_dotp = staged.mux(RegNext(done).init(False), done)
+            val sel_dotp = staged.mux(RegNext(selected).init(False), selected)
+
+            // Compute
+            val partial_sum = AQ.mux(
+                Q8 -> DotProduct(opa_dotp, opb_dotp, bitWidth = 8),
+                Q4 -> DotProduct(opa_dotp, opb_dotp, bitWidth = 4),
+                Q2 -> DotProduct(opa_dotp, opb_dotp, bitWidth = 2),
+                Q1 -> DotProductSym1Bit(opa_dotp, opb_dotp)
+            )
+
+            val acc_add = acc + partial_sum
+
+            RES := acc_add.asBits
+
+            val acc_clear = done_dotp || !sel_dotp
+            acc := acc_clear.mux(S(0, xlen bits), acc_add)
+
+
+            val shift_en = staged.mux(selected && !done_dotp, selected)
+            // Multi-Cycle Control
+            when(shift_en){
                 rs1_offset := rs1_offset + offset_inc
                 rs2_offset := rs2_offset + rs2_inc
-                acc := acc_add
                 if(!singleCycle) cycleCount := cycleCount + 1
             } otherwise {
-                acc := 0
                 if(!singleCycle) cycleCount := 0
             }
 
-            val unscheduleRequest = RegNext(isCancel) clearWhen (isReady) init (False)
-            val freeze = request && !isLastCycle && !unscheduleRequest
+            val unscheduleRequest = RegNext(isCancel).clearWhen(isReady).init(False)
+            val freeze = selected && !done_dotp && !unscheduleRequest
             el.freezeWhen(freeze)
         }
+
         val format = new el.Execute(id = formatAt) {
             //Provide the computation value for the writeback
             wb.valid := SEL

@@ -198,6 +198,7 @@ class ParamSimple() {
 
   var withMiCo = false
   var micoWidth = 32
+  var micoStaged = false
 
   var fetchTsp = MmuStorageParameter(
     levels = List(
@@ -707,6 +708,7 @@ class ParamSimple() {
     }
     opt[Unit]("mico") action { (v, c) => withMiCo = true}
     opt[Int]("mico-width") action { (v, c) => micoWidth = v}
+    opt[Unit]("mico-staged") action { (v, c) => micoStaged = true}
   }
 
   // Generate the VexiiRiscv plugin list out of the current SimpleParam configuration
@@ -870,7 +872,8 @@ class ParamSimple() {
     plugins += new SrcPlugin(early0, executeAt = 0, relaxedRs = relaxedSrc)
     plugins += new IntAluPlugin(early0, formatAt = 0)
     plugins += shifter(early0, formatAt = relaxedShift.toInt)
-    if(withMiCo) plugins += new MiCoMultiCyclePlugin(early0, simdWidth=micoWidth)
+    if(withMiCo) plugins += new MiCoMultiCyclePlugin(early0, staged = micoStaged, simdWidth=micoWidth)
+    // if (withMiCo) plugins += new MiCoPluginV2(early0)
     plugins += new IntFormatPlugin(lane0)
     plugins += new BranchPlugin(layer=early0, aluAt=0, jumpAt=relaxedBranch.toInt, wbAt=0)
     if(withRvZknAes) plugins += new AesZknPlugin(layer = early0)
