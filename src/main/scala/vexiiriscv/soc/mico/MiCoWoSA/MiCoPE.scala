@@ -33,7 +33,6 @@ object MiCoCompute extends AreaObject {
 }
 
 class MiCoMAC(dataWidth : Int, accWidth : Int) extends Component {
-    import MiCoCompute._
     val io = new Bundle {
         val a = in(SInt(dataWidth bits))
         val b = in(SInt(dataWidth bits))
@@ -42,25 +41,28 @@ class MiCoMAC(dataWidth : Int, accWidth : Int) extends Component {
         val result = out(SInt(accWidth bits))
     }
 
-    val a_int4 = io.a.asBits.subdivideIn(4 bits)
-    val b_int4 = io.b.asBits.subdivideIn(4 bits)
+    val a_int4 = io.a.subdivideIn(4 bits)
+    val b_int4 = io.b.subdivideIn(4 bits)
 
-    val a0_mult_b0 = (a_int4(0).asUInt * b_int4(0).asUInt)
-    val a1_mult_b1 = (a_int4(1).asUInt * b_int4(1).asUInt)
+    val a0_mult_b0 = ((a_int4(0).msb & io.mode) ## a_int4(0)).asSInt * 
+                     ((b_int4(0).msb & io.mode) ## b_int4(0)).asSInt
 
-    val a0_mult_b1 = (a_int4(0).asUInt * b_int4(1).asUInt)
-    val a1_mult_b0 = (a_int4(1).asUInt * b_int4(0).asUInt)
+    val a1_mult_b1 = a_int4(1) * b_int4(1)
 
-    // val mult_int8 = (
-    //     a0_mult_b0.resize(16 bits) +^ 
-    //     ((a0_mult_b1 +^ a1_mult_b0).resize(16 bits) << 4) +^ 
-    //     (a1_mult_b1.resize(16 bits) << 8)
-    // ).asSInt.resize(accWidth bits)
+    val a0_mult_b1 = a_int4(0).asUInt.intoSInt * b_int4(1) // Extend single zero for positive
+    val a1_mult_b0 = a_int4(1) * b_int4(0).asUInt.intoSInt // Extend single zero for positive
     
-    val mult_int8 = (io.a * io.b).resize(accWidth bits)
+    // val mult_int8 = (io.a * io.b).resize(accWidth bits) // Separate multiplier
+
+    val mult_int8 = (
+        a0_mult_b0.resize(16 bits) +
+        (a0_mult_b1 << 4).resize(16 bits) +
+        (a1_mult_b0 << 4).resize(16 bits) +
+        (a1_mult_b1 << 8).resize(16 bits)
+    )
 
     val mult_int4 = (
-        (a0_mult_b0 +^ a1_mult_b1).asSInt
+        (a0_mult_b0 +^ a1_mult_b1)
     ).resize(accWidth bits)
 
     io.result := io.c + io.mode.mux(mult_int4, mult_int8)
@@ -83,16 +85,16 @@ object SimulateMAC extends App {
         dut.io.mode #= false
 
         dut.clockDomain.waitSampling()
-        println(s"int8 MAC Result: ${dut.io.result.toBigInt}")
+        println(s"int8 MAC Result: ${dut.io.result.toInt}")
 
         // Test int4 mode
         dut.io.a #= 0x12 // 1 and 2
-        dut.io.b #= 0x34 // 3 and 4
+        dut.io.b #= 0x3F // 3 and -1
         dut.io.c #= 0
         dut.io.mode #= true
 
         dut.clockDomain.waitSampling()
-        println(s"int4 MAC Result: ${dut.io.result.toBigInt}")
+        println(s"int4 MAC Result: ${dut.io.result.toInt}")
     }
 }
 
