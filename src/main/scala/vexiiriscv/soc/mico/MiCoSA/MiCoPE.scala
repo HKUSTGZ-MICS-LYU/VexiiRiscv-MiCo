@@ -9,6 +9,8 @@ import spinal.lib.bus.misc._
 import spinal.lib.bus.tilelink._
 import spinal.lib.misc._
 
+import spinal.core.sim._
+
 object MiCoCompute extends AreaObject {
     def Product(op_a : Bits, op_b : Bits, bitWidth : Int) : Vec[SInt] = {
         val a_vec = op_a.subdivideIn(bitWidth bits)
@@ -30,48 +32,117 @@ object MiCoCompute extends AreaObject {
     } 
 }
 
-class MiCoPE(config : MiCoSAConfig) extends Component {
+class MiCoMAC(dataWidth : Int, accWidth : Int) extends Component {
+    val io = new Bundle {
+        val a = in(SInt(dataWidth bits))
+        val b = in(SInt(dataWidth bits))
+        val c = in(SInt(accWidth bits))
+        val mode = in(Bool()) // false: int8, true: int4
+        val result = out(SInt(accWidth bits))
+    }
+
+    val a_int4 = io.a.subdivideIn(4 bits)
+    val b_int4 = io.b.subdivideIn(4 bits)
+
+    val a0_mult_b0 = ((a_int4(0).msb & io.mode) ## a_int4(0)).asSInt * 
+                     ((b_int4(0).msb & io.mode) ## b_int4(0)).asSInt
+
+    val a1_mult_b1 = a_int4(1) * b_int4(1)
+
+    val a0_mult_b1 = a_int4(0).asUInt.intoSInt * b_int4(1) // Extend single zero for positive
+    val a1_mult_b0 = a_int4(1) * b_int4(0).asUInt.intoSInt // Extend single zero for positive
+    
+    // val mult_int8 = (io.a * io.b).resize(accWidth bits) // Separate multiplier
+
+    val mult_int8 = (
+        a0_mult_b0.resize(16 bits) +
+        (a0_mult_b1 << 4).resize(16 bits) +
+        (a1_mult_b0 << 4).resize(16 bits) +
+        (a1_mult_b1 << 8).resize(16 bits)
+    )
+
+    val mult_int4 = (
+        (a0_mult_b0 +^ a1_mult_b1)
+    ).resize(accWidth bits)
+
+    io.result := io.c + io.mode.mux(mult_int4, mult_int8)
+}
+object SimulateMAC extends App {
+    Config.sim.compile(new MiCoMAC(8, 32)).doSim { dut =>
+        dut.clockDomain.forkStimulus(10)
+
+        dut.io.a #= 0
+        dut.io.b #= 0
+        dut.io.c #= 0
+        dut.io.mode #= false
+
+        dut.clockDomain.waitSampling()
+
+        // Test int8 mode
+        dut.io.a #= -1
+        dut.io.b #= 1
+        dut.io.c #= 0
+        dut.io.mode #= false
+
+        dut.clockDomain.waitSampling()
+        println(s"int8 MAC Result: ${dut.io.result.toInt}")
+
+        // Test int4 mode
+        dut.io.a #= 0x12 // 1 and 2
+        dut.io.b #= 0x3F // 3 and -1
+        dut.io.c #= 0
+        dut.io.mode #= true
+
+        dut.clockDomain.waitSampling()
+        println(s"int4 MAC Result: ${dut.io.result.toInt}")
+    }
+}
+
+class MiCoPE(config: MiCoSAConfig) extends Component {
 
     val dataWidth = config.dataWidth
     val accWidth = config.accWidth
 
     val io = new Bundle {
-        val in_a = in(SInt(dataWidth bits))
-        val in_b = in(SInt(dataWidth bits))
-        val out_a = out(SInt(dataWidth bits))
-        val out_b = out(SInt(dataWidth bits))
-        val in_res = in(SInt(accWidth bits))
-        val out_res = out(SInt(accWidth bits))
-        val enable = in(Bool()) default(True)
-        val propagate = in(Bool()) default(False)
+        val enable = in(Bool()) default(False)
         val clear = in(Bool()) default(False)
+        val load = in(Bool()) default(False)
+        val mode = in(Bool()) default(False) // false: int8, true: int4
+        val in_act = in(SInt(dataWidth bits))
+        val in_wt = in(SInt(dataWidth bits))
+        val in_acc = in(SInt(accWidth bits))
+        val out_act = out(SInt(dataWidth bits))
+        val out_acc = out(SInt(accWidth bits))
     }
 
-    val reg_a = Reg(SInt(dataWidth bits)) init(0)
-    val reg_b = Reg(SInt(dataWidth bits)) init(0)
+    val reg_act = Reg(SInt(dataWidth bits)) init(0)
+    val reg_wt = Reg(SInt(dataWidth bits)) init(0)
     val acc = Reg(SInt(accWidth bits)) init(0)
-    val mac = acc + (io.in_a * io.in_b).resized
-    
+
+    io.out_act := reg_act
+
+    val mult = new MiCoMAC(dataWidth, accWidth)
+
+    mult.io.a := reg_act
+    mult.io.b := reg_wt
+    mult.io.c := acc
+    mult.io.mode := io.mode
+    io.out_acc := mult.io.result
+
     when(io.clear) {
         acc := 0
-        reg_a := 0
-        reg_b := 0
-    } elsewhen (io.enable) {
-        reg_a := io.in_a
-        reg_b := io.in_b
-        when(io.propagate) {
-            acc := io.in_res
-        } otherwise {
-            acc := mac
-        }
+        reg_act := 0
+        reg_wt := 0
+    } elsewhen(io.load){
+        reg_wt := io.in_wt
+    } elsewhen(io.enable){
+        reg_act := io.in_act
+        acc := io.in_acc
     }
-    io.out_a := reg_a
-    io.out_b := reg_b
-    io.out_res := io.propagate.mux(acc, mac)
 }
-
 
 object GeneratePE extends App {
     Config.spinal.generateVerilog(
-        new MiCoPE(MiCoSAConfig(size = 4, dataWidth = 8, accWidth = 32)))
+        new MiCoPE(MiCoSAConfig(size = 4, dataWidth = 8, accWidth = 32))
+    )
 }

@@ -13,3 +13,9 @@ object Config {
 
   def sim = SimConfig.withConfig(spinal).withFstWave
 }
+
+case class MiCoSAConfig(
+    size : Int = 4,
+    dataWidth : Int = 8,
+    accWidth : Int = 32
+)
