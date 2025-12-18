@@ -55,13 +55,6 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
       bus.setDownConnection(a = StreamPipe.S2M)
     }
 
-    val accel = p.useMiCoBitSerial generate new BitSerialCoreFiber(
-      BitSerialCoreParam(xlen = 32)
-    ){
-      mainBus << down
-      down.setDownConnection(a = StreamPipe.S2M)
-      up at 0x18000000 of mainBus
-    }
     var memBus: Node = null
     val l2 = p.withL2Cache generate new Area {
       val cache = new CacheFiber(withCtrl = true)
@@ -81,21 +74,23 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
     // }
     if(memBus == null) memBus = mainBus // No L2, no Hub, the CPU is directly connected to the memory bus
     memBus.forceDataWidth(p.vexii.memDataWidth)
-
-    // val mBus = new SlaveBus(
-    //   M2sSupport(
-    //     transfers = M2sTransfers.all,
-    //     dataWidth = 32,
-    //     addressWidth = 32
-    //   ),
-    //   S2mParameters(Nil)
-    // )
-    // mBus.node at SizeMapping(0x80000000l, 0x80000000l) of memBus
-    // mBus.node.addTags(PMA.MAIN, PMA.EXECUTABLE)
-
+    
+    var mBus : SlaveBus = null
+    if(p.sparseMem){
+      mBus = new SlaveBus(
+        M2sSupport(
+          transfers = M2sTransfers.all,
+          dataWidth = 32,
+          addressWidth = 32
+        ),
+        S2mParameters(Nil)
+      )
+      mBus.node at SizeMapping(0x80000000l, 0x80000000l) of memBus
+      mBus.node.addTags(PMA.MAIN, PMA.EXECUTABLE)
+    }
     val ram = new tilelink.fabric.RamFiber(p.ramBytes)
-    ram.up at 0x80000000l of memBus
-    // ram.up at 0x40000000l of memBus
+    val ramAt = p.sparseMem.mux(0x40000000l, 0x80000000l)
+    ram.up at ramAt of memBus
 
     // Handle all the IO / Peripheral things
     val peripheral = new Area {

@@ -41,8 +41,11 @@ class MiCoMAC(dataWidth : Int, accWidth : Int) extends Component {
         val result = out(SInt(accWidth bits))
     }
 
-    val a_int4 = io.a.subdivideIn(4 bits)
-    val b_int4 = io.b.subdivideIn(4 bits)
+    val halfWidth = dataWidth / 2
+    val prodWidth = dataWidth * 2
+
+    val a_int4 = io.a.subdivideIn(halfWidth bits)
+    val b_int4 = io.b.subdivideIn(halfWidth bits)
 
     val a0_mult_b0 = ((a_int4(0).msb & io.mode) ## a_int4(0)).asSInt * 
                      ((b_int4(0).msb & io.mode) ## b_int4(0)).asSInt
@@ -55,10 +58,10 @@ class MiCoMAC(dataWidth : Int, accWidth : Int) extends Component {
     // val mult_int8 = (io.a * io.b).resize(accWidth bits) // Separate multiplier
 
     val mult_int8 = (
-        a0_mult_b0.resize(16 bits) +
-        (a0_mult_b1 << 4).resize(16 bits) +
-        (a1_mult_b0 << 4).resize(16 bits) +
-        (a1_mult_b1 << 8).resize(16 bits)
+        a0_mult_b0.resize(prodWidth bits) +
+        (a0_mult_b1 << halfWidth).resize(prodWidth bits) +
+        (a1_mult_b0 << halfWidth).resize(prodWidth bits) +
+        (a1_mult_b1 << dataWidth).resize(prodWidth bits)
     )
 
     val mult_int4 = (

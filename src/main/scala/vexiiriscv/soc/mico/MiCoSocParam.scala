@@ -26,7 +26,7 @@ class MiCoSocParam {
   var l2Bytes = 4096
   var withHub = false
 
-  var useMiCoBitSerial = false
+  var sparseMem = false
 
   // Provide some sane default
   // vexii.fetchForkAt = 1
@@ -40,6 +40,7 @@ class MiCoSocParam {
   def addOptions(parser: scopt.OptionParser[Unit]): Unit = {
     import parser._
     opt[Int]("ram-bytes") action { (v, c) => ramBytes = v }
+    opt[Int]("ram-kbytes") action { (v, c) => ramBytes = v * 1024 }
     opt[String]("ram-elf") action { (v, c) => ramElf = Some(new File(v)) }
     opt[Unit]("ram-blackbox") action { (v, c) => ramBlackBox = true  }
     opt[Boolean]("spi-flash") action { (v, c) => withSpiFlash = v  }
@@ -49,11 +50,11 @@ class MiCoSocParam {
     opt[Int]("mico-vpu-bus-width") action { (v, c) => MiCoVpuBusWidth = v }
     opt[Unit]("mico-vpu-stress") action { (v, c) => MiCoVpuStress = true }
     opt[Unit]("mico-vpu-pipe") action { (v, c) => MiCoVpuPipe = true }
-    opt[Unit]("mico-bs") action { (v, c) => useMiCoBitSerial = true }
     opt[Unit]("l2-cache") action { (v, c) => withL2Cache = true; vexii.lsuL1Coherency = true}
     opt[Unit]("with-hub") action { (v, c) => withHub = true; vexii.lsuL1Coherency = true}
     opt[Int]("l2-ways") action { (v, c) => l2Ways = v }
     opt[Int]("l2-bytes") action { (v, c) => l2Bytes = v }
+    opt[Unit]("sparse-mem") action { (v, c) => sparseMem = true }
     socCtrl.addOptions(parser)
     vexii.addOptions(parser)
   }
