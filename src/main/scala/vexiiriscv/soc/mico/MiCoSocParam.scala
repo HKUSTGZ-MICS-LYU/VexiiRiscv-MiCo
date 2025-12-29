@@ -22,11 +22,12 @@ class MiCoSocParam {
   var MiCoVpuStress = false
   var MiCoVpuPipe = false
   var withL2Cache = false
-  var l2Ways = 4
+  var l2Ways = 8
   var l2Bytes = 4096
   var withHub = false
 
   var sparseMem = false
+  var sparseMemDelay = 0.0f
 
   // Provide some sane default
   // vexii.fetchForkAt = 1
@@ -55,6 +56,7 @@ class MiCoSocParam {
     opt[Int]("l2-ways") action { (v, c) => l2Ways = v }
     opt[Int]("l2-bytes") action { (v, c) => l2Bytes = v }
     opt[Unit]("sparse-mem") action { (v, c) => sparseMem = true }
+    opt[Double]("sparse-mem-delay") action { (v, c) => sparseMemDelay = v.toFloat }
     socCtrl.addOptions(parser)
     vexii.addOptions(parser)
   }
@@ -62,5 +64,9 @@ class MiCoSocParam {
   // After modifying the attributes of this class, you need to call the legalize function to check / fix it is fine.
   def legalize(): Unit = {
     vexii.privParam.withDebug = socCtrl.withDebug
+    if(useMiCoVpu){
+      vexii.lsuMemDataWidthMin = MiCoVpuBusWidth
+      // vexii.fetchMemDataWidth
+    }
   }
 }

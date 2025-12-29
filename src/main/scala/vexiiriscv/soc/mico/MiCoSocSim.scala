@@ -82,18 +82,22 @@ object MiCoSocSim extends App{
     // Use Sparse Memory to simulate off-chip mem instead of on-chip RAM block
     val mem = SparseMemory(seed = 0, randOffset = 0x80000000l)
     if(p.sparseMem){
+      val factor = 1.0f - p.sparseMemDelay
       val ma = new MemoryAgent(
         dut.system.mBus.node.bus, 
         dut.socCtrl.system.cd , 
         seed = 0, 
-        randomProberFactor = 0.2f, 
+        randomProberFactor = if(factor < 1.0f) 0.2f else 0.0f, 
         memArg = Some(mem))(null)
       val checker = if (ma.monitor.bus.p.withBCE) Checker(ma.monitor)
-      ma.driver.driver.setFactor(0.8f) // with some random stalls
+      ma.driver.driver.setFactor(factor) // with some random stalls
     }
     if(elfFile != null) {
       val elf = new Elf(elfFile, p.vexii.xlen)
-      if(p.sparseMem){elf.load(mem, 0x80000000l)}
+      if(p.sparseMem){
+        elf.load(mem, 0x80000000l)
+        elf.load(dut.system.ram.thread.logic.mem, 0x40000000l, true)
+      }
       else {elf.load(dut.system.ram.thread.logic.mem, 0x80000000l, true)}
       
       if(p.withSpiFlash) elf.loadArray(spiFlash.content, 0x20000000l, true)

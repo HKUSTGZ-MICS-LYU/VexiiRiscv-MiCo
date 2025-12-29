@@ -73,14 +73,14 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
     //   memBus = hub.down
     // }
     if(memBus == null) memBus = mainBus // No L2, no Hub, the CPU is directly connected to the memory bus
-    memBus.forceDataWidth(p.vexii.memDataWidth)
+    // memBus.forceDataWidth(p.vexii.memDataWidth)
     
     var mBus : SlaveBus = null
     if(p.sparseMem){
       mBus = new SlaveBus(
         M2sSupport(
           transfers = M2sTransfers.all,
-          dataWidth = 32,
+          dataWidth = 64,
           addressWidth = 32
         ),
         S2mParameters(Nil)
