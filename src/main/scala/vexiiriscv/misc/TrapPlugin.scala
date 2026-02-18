@@ -93,6 +93,8 @@ object TrapReason{
   val SFENCE_VMA = 6
   val MMU_REFILL = 7
   val WFI = 8
+  val HFENCE_GMA = 9
+  val SMMU_REFILL = 10
 }
 
 /**
@@ -382,6 +384,7 @@ class TrapPlugin(val trapAt : Int) extends FiberPlugin with TrapService {
           val TRAP_EPC, TRAP_TVAL, TRAP_HTVAL, TRAP_HTINST, TRAP_TVEC, TRAP_WAIT, TRAP_APPLY = new State()
           val XRET_EPC, XRET_APPLY = new State()
           val ATS_RSP = ats.mayNeedRedo generate new State()
+          val SATS_RSP = sats.mayNeedRedo generate new State()
           val JUMP = new State()
           val LSU_FLUSH = lsu.nonEmpty generate new State()
           val FETCH_FLUSH = fl1p.nonEmpty generate new State()
@@ -415,8 +418,9 @@ class TrapPlugin(val trapAt : Int) extends FiberPlugin with TrapService {
           // Interface with the address translation service (MMU)
           val atsPorts = ats.mayNeedRedo generate new Area{
             val refill = ats.newRefillPort()
+            val isGuestRefill = pending.state.arg(2) || PrivilegeMode.isGuest(priv.getPrivilege(hartId))
             refill.cmd.valid := False
-            refill.cmd.guest := pending.state.arg(2) || PrivilegeMode.isGuest(priv.getPrivilege(hartId))
+            refill.cmd.guest := isGuestRefill
             refill.cmd.storageEnable := True
             refill.cmd.address := pending.state.tval.asUInt
             refill.cmd.storageId := pending.state.arg(3, ats.getStorageIdWidth() bits).asUInt
@@ -434,7 +438,7 @@ class TrapPlugin(val trapAt : Int) extends FiberPlugin with TrapService {
           val satsPorts = sats.mayNeedRedo generate new Area{
             val refill = sats.newRefillPort()
             refill.cmd.valid := False
-            refill.cmd.guest := pending.state.arg(2) || PrivilegeMode.isGuest(priv.getPrivilege(hartId))
+            refill.cmd.guest := True
             refill.cmd.storageEnable := True
             refill.cmd.address := pending.state.tval.asUInt
             refill.cmd.storageId := pending.state.arg(3+ats.getStorageIdWidth(), sats.getStorageIdWidth() bits).asUInt
@@ -475,6 +479,7 @@ class TrapPlugin(val trapAt : Int) extends FiberPlugin with TrapService {
               TrapReason.NEXT,
               TrapReason.FENCE_I,
               TrapReason.SFENCE_VMA,
+              TrapReason.HFENCE_GMA,
               TrapReason.WFI
             ).map(pending.state.code === _).orR
           )
@@ -584,6 +589,22 @@ class TrapPlugin(val trapAt : Int) extends FiberPlugin with TrapService {
                     goto(ATS_RSP)
                   }
                 }
+                is(TrapReason.HFENCE_GMA) {
+                  if(sats.mayNeedRedo) {
+                    satsPorts.invalidate.cmd.valid := True
+                    when(satsPorts.invalidate.cmd.ready) {
+                      goto(JUMP)
+                    }
+                  } else {
+                    goto(JUMP)
+                  }
+                }
+                if(sats.mayNeedRedo) is(TrapReason.SMMU_REFILL) {
+                  satsPorts.refill.cmd.valid := True
+                  when(satsPorts.refill.cmd.ready){
+                    goto(SATS_RSP)
+                  }
+                }
                 if(priv.p.debugTriggers > 0 ) is(TrapReason.DEBUG_TRIGGER) {
                   trapEnterDebug := True
                   goto(TRAP_EPC)
@@ -614,10 +635,8 @@ class TrapPlugin(val trapAt : Int) extends FiberPlugin with TrapService {
 
           if(ats.mayNeedRedo) ATS_RSP.whenIsActive {
             when(atsPorts.refill.rsp.valid) {
-              api.harts(hartId).redo := True
-              atsPorts.refill.rsp.ready := True
-              goto(JUMP) // improvement: shave one cycle
               when(atsPorts.refill.rsp.pageFault || atsPorts.refill.rsp.accessFault) {
+                atsPorts.refill.rsp.ready := True
                 pending.state.exception := True
                 switch(atsPorts.refill.rsp.accessFault ## pending.state.arg(1 downto 0)) {
                   def add(k : Int, v : Int) = is(k){pending.state.code := v}
@@ -627,6 +646,43 @@ class TrapPlugin(val trapAt : Int) extends FiberPlugin with TrapService {
                   add(TrapArg.FETCH    , CSR.MCAUSE_ENUM.INSTRUCTION_PAGE_FAULT)
                   add(TrapArg.LOAD     , CSR.MCAUSE_ENUM.LOAD_PAGE_FAULT)
                   add(TrapArg.STORE    , CSR.MCAUSE_ENUM.STORE_PAGE_FAULT)
+                }
+                goto(TRAP_TVAL)
+              } otherwise {
+                if(sats.mayNeedRedo) {
+                  when (atsPorts.isGuestRefill) {
+                    satsPorts.refill.cmd.address := atsPorts.refill.rsp.address.resized
+                    satsPorts.refill.cmd.valid := True
+                    when(satsPorts.refill.cmd.ready){
+                      atsPorts.refill.rsp.ready := True
+                      goto(SATS_RSP)
+                    }
+                  } otherwise {
+                    api.harts(hartId).redo := True
+                    atsPorts.refill.rsp.ready := True
+                    goto(JUMP)
+                  }
+                } else {
+                  api.harts(hartId).redo := True
+                  atsPorts.refill.rsp.ready := True
+                  goto(JUMP) // improvement: shave one cycle
+                }
+              }
+            }
+          }
+
+          if(sats.mayNeedRedo) SATS_RSP.whenIsActive {
+            when(satsPorts.refill.rsp.valid) {
+              api.harts(hartId).redo := True
+              satsPorts.refill.rsp.ready := True
+              goto(JUMP) // improvement: shave one cycle
+              when(satsPorts.refill.rsp.pageFault || satsPorts.refill.rsp.accessFault) {
+                pending.state.exception := True
+                switch(pending.state.arg(1 downto 0)){
+                  def add(k : Int, v : Int) = is(k){pending.state.code := v}
+                  add(TrapArg.FETCH    , CSR.MCAUSE_ENUM.INSTRUCTION_GUEST_PAGE_FAULT)
+                  add(TrapArg.LOAD     , CSR.MCAUSE_ENUM.LOAD_GUEST_PAGE_FAULT)
+                  add(TrapArg.STORE    , CSR.MCAUSE_ENUM.STORE_GUEST_PAGE_FAULT)
                 }
                 goto(TRAP_TVAL)
               }
