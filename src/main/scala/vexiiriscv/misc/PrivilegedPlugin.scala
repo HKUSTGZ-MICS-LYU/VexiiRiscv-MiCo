@@ -686,6 +686,8 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
             if (p.withSSTC) api.write(stce, CSR.MENVCFG, 63)
           }
         }
+        api.allowCsr(CSR.MENVCFG, True)
+        if (XLEN.get == 32) api.allowCsr(CSR.MENVCFGH, True)
       }
 
       val mcounteren = p.withRdTime generate new Area {
@@ -719,6 +721,8 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
             }
           }
         }
+        api.allowCsr(CSR.HENVCFG, True)
+        if (XLEN.get == 32) api.allowCsr(CSR.HENVCFGH, True)
 
         val counteren = p.withRdTime generate new Area {
           val tm = RegInit(False)
@@ -984,6 +988,8 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
           val priority = Mux(interrupt === B(0), B(0), B(1))
           api.read(CSR.STOPI, 0 -> priority, 16 -> interrupt)
         }
+
+        api.allowCsr(CSR.SENVCFG, True)
       }
 
       val vs = p.withHypervisor generate new Area {
