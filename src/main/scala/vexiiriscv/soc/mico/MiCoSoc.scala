@@ -77,6 +77,8 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
     
     var mBus : SlaveBus = null
     if(p.sparseMem){
+      val sparseMemAt = 0x82000000l
+      val sparseMemSize = 0x10000000l // 256MB by default
       mBus = new SlaveBus(
         M2sSupport(
           transfers = M2sTransfers.all,
@@ -85,11 +87,11 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
         ),
         S2mParameters(Nil)
       )
-      mBus.node at SizeMapping(0x80000000l, 0x80000000l) of memBus
-      mBus.node.addTags(PMA.MAIN, PMA.EXECUTABLE)
+      mBus.node at SizeMapping(sparseMemAt, sparseMemSize) of memBus
+      mBus.node.addTag(PMA.MAIN)
     }
     val ram = new tilelink.fabric.RamFiber(p.ramBytes)
-    val ramAt = p.sparseMem.mux(0x40000000l, 0x80000000l)
+    val ramAt = 0x80000000l
     ram.up at ramAt of memBus
 
     // Handle all the IO / Peripheral things

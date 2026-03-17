@@ -18,7 +18,7 @@ sbt "runMain vexiiriscv.soc.mico.MiCoSocSim \
     --fetch-l1-ways 2 \
     --allow-bypass-from 0 \
     --div-radix 4 \
-    --ram-bytes 10000000 \
+    --sparse-mem \
     --mico-vpu \
     --mico-vpu-len 256 \
     --mico-vpu-width 256 \

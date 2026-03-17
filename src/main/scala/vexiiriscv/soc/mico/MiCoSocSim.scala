@@ -73,6 +73,7 @@ object MiCoSocSim extends App{
     if (withRvlsCheck) probe.add(new RvlsBackend(new File(currentTestPath)).spinalSimFlusher(hzToLong(1000 Hz)))
 
     probe.autoRegions()
+    probe.checkLiveness = false
 
     if(p.socCtrl.withJtagTap) {
       probe.checkLiveness = false
@@ -80,7 +81,7 @@ object MiCoSocSim extends App{
     }
 
     // Use Sparse Memory to simulate off-chip mem instead of on-chip RAM block
-    val mem = SparseMemory(seed = 0, randOffset = 0x80000000l)
+    val mem = SparseMemory(seed = 0, randOffset = 0x82000000l)
     if(p.sparseMem){
       val factor = 1.0f - p.sparseMemDelay
       val ma = new MemoryAgent(
@@ -95,8 +96,8 @@ object MiCoSocSim extends App{
     if(elfFile != null) {
       val elf = new Elf(elfFile, p.vexii.xlen)
       if(p.sparseMem){
-        elf.load(mem, 0x80000000l)
-        elf.load(dut.system.ram.thread.logic.mem, 0x40000000l, true)
+        elf.load(mem, 0x82000000l)
+        elf.load(dut.system.ram.thread.logic.mem, 0x80000000l, true)
       }
       else {elf.load(dut.system.ram.thread.logic.mem, 0x80000000l, true)}
       
