@@ -7,7 +7,7 @@ import spinal.core.fiber._
 import spinal.lib.com.spi.sim.FlashModel
 import spinal.lib.com.uart.sim.{UartDecoder, UartEncoder}
 import spinal.lib.sim.SparseMemory
-import spinal.lib.bus.tilelink.sim.{Checker, MemoryAgent}
+import spinal.lib.bus.tilelink.sim.{Checker, MemoryAgent, TransactionA}
 import spinal.lib.misc.Elf
 import vexiiriscv.test.VexiiRiscvProbe
 
@@ -89,7 +89,11 @@ object MiCoSocSim extends App{
         dut.socCtrl.system.cd , 
         seed = 0, 
         randomProberFactor = if(factor < 1.0f) 0.2f else 0.0f, 
-        memArg = Some(mem))(null)
+        memArg = Some(mem))(null){
+          override def delayOnA(a: TransactionA) = {
+            dut.socCtrl.system.cd.waitSampling(p.sparseMemLat)
+          }
+        }
       val checker = if (ma.monitor.bus.p.withBCE) Checker(ma.monitor)
       ma.driver.driver.setFactor(factor) // with some random stalls
     }

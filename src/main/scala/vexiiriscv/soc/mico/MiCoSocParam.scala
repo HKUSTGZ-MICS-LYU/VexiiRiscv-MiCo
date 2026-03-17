@@ -27,6 +27,7 @@ class MiCoSocParam {
   var withHub = false
 
   var sparseMem = false
+  var sparseMemLat = 4
   var sparseMemDelay = 0.0f
 
   // Provide some sane default
@@ -56,6 +57,7 @@ class MiCoSocParam {
     opt[Int]("l2-ways") action { (v, c) => l2Ways = v }
     opt[Int]("l2-bytes") action { (v, c) => l2Bytes = v }
     opt[Unit]("sparse-mem") action { (v, c) => sparseMem = true }
+    opt[Int]("sparse-mem-lat") action { (v, c) => sparseMemLat = v}
     opt[Double]("sparse-mem-delay") action { (v, c) => sparseMemDelay = v.toFloat }
     socCtrl.addOptions(parser)
     vexii.addOptions(parser)
@@ -64,8 +66,12 @@ class MiCoSocParam {
   // After modifying the attributes of this class, you need to call the legalize function to check / fix it is fine.
   def legalize(): Unit = {
     vexii.privParam.withDebug = socCtrl.withDebug
+    if(sparseMem){
+      // Sparse memory bus is wired as 64-bit in MiCoSoc; keep LSU memory width aligned.
+      vexii.lsuMemDataWidthMin = vexii.lsuMemDataWidthMin max 64
+    }
     if(useMiCoVpu){
-      vexii.lsuMemDataWidthMin = MiCoVpuBusWidth
+      vexii.lsuMemDataWidthMin = vexii.lsuMemDataWidthMin max MiCoVpuBusWidth
       // vexii.fetchMemDataWidth
     }
   }
