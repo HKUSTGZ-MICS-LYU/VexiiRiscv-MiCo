@@ -72,7 +72,6 @@ class MiCoSocParam {
     }
     if(useMiCoVpu){
       vexii.lsuMemDataWidthMin = vexii.lsuMemDataWidthMin max MiCoVpuBusWidth
-      // vexii.fetchMemDataWidth
     }
   }
 }

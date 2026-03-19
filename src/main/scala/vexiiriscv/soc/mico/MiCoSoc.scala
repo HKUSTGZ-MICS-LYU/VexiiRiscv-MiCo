@@ -33,8 +33,15 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
 
     val cpu = new TilelinkVexiiRiscvFiber(p.vexii.plugins())
     if(p.socCtrl.withDebug) socCtrl.debugModule.bindHart(cpu)
-    mainBus << List(cpu.iBus, p.vexii.lsuL1Enable.mux(cpu.lsuL1Bus, cpu.dBus))
-    ioBus << List(cpu.dBus)
+    if(p.vexii.lsuL1Enable){
+      // Split cached memory and IO paths only when the LSU L1 is enabled.
+      mainBus << List(cpu.iBus, cpu.lsuL1Bus)
+      ioBus << List(cpu.dBus)
+    } else {
+      // Cacheless mode has a single data path; route peripherals from main bus.
+      mainBus << List(cpu.iBus, cpu.dBus)
+      ioBus << mainBus
+    }
     cpu.dBus.setDownConnection(a = StreamPipe.S2M) // Let's add a bit of pipelining on the cpu.dBus to increase FMax
 
     val vpuParam = VpuCfuParameter(
