@@ -11,6 +11,7 @@ class MiCoSocParam {
   var ramBytes = 512 KiB
   var ramElf = Option.empty[File]
   var ramBlackBox = false
+  var blackBoxASIC = false
   val vexii = new ParamSimple()
   val socCtrl = new SocCtrlParam()
   var withSpiFlash = false
@@ -45,6 +46,7 @@ class MiCoSocParam {
     opt[Int]("ram-kbytes") action { (v, c) => ramBytes = v * 1024 }
     opt[String]("ram-elf") action { (v, c) => ramElf = Some(new File(v)) }
     opt[Unit]("ram-blackbox") action { (v, c) => ramBlackBox = true  }
+    opt[Unit]("blackbox-all") action { (v, c) => blackBoxASIC = true }
     opt[Boolean]("spi-flash") action { (v, c) => withSpiFlash = v  }
     opt[Unit]("mico-vpu") action { (v, c) => useMiCoVpu = true; vexii.withCfu = true}
     opt[Int]("mico-vpu-len") action { (v, c) => MiCoVpuLen = v }

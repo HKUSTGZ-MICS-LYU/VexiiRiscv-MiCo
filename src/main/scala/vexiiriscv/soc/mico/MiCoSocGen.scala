@@ -55,10 +55,11 @@ object MiCoSocGen extends App{
   }.parse(args, ()).nonEmpty)
   p.legalize()
 
+  val policy = if(p.blackBoxASIC) blackboxAllWhatsYouCan else blackboxOnlyIfRequested 
     
   val report = SpinalConfig()
-    // .addStandardMemBlackboxing(blackboxAll)
-    .generateVerilog(new MiCoSoc(p))
+              .addStandardMemBlackboxing(policy)
+              .generateVerilog(new MiCoSoc(p))
 
   Bsp(new File("."), report.toplevel.system.cpu)
 }
