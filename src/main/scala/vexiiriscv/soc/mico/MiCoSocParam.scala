@@ -66,6 +66,14 @@ class MiCoSocParam {
   // After modifying the attributes of this class, you need to call the legalize function to check / fix it is fine.
   def legalize(): Unit = {
     vexii.privParam.withDebug = socCtrl.withDebug
+    if(withL2Cache || withHub){
+      // Coherent interconnect front-ends require LSU L1 to emit acquire traffic.
+      vexii.lsuL1Coherency = true
+      vexii.lsuL1Enable = true
+      // In coherent mode, Tilelink C-source IDs are shared with writeback/probe paths.
+      // Keep enough source bits by ensuring refill IDs cover writeback IDs.
+      vexii.lsuL1RefillCount = vexii.lsuL1RefillCount max vexii.lsuL1WritebackCount
+    }
     if(sparseMem){
       // Sparse memory bus is wired as 64-bit in MiCoSoc; keep LSU memory width aligned.
       vexii.lsuMemDataWidthMin = vexii.lsuMemDataWidthMin max 64
