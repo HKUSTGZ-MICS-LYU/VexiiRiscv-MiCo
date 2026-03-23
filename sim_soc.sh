@@ -21,5 +21,4 @@ sbt "runMain vexiiriscv.soc.mico.MiCoSocSim \
     --sparse-mem \
     --mico-vpu \
     --mico-vpu-len 256 \
-    --mico-vpu-width 256 \
-    --mico-vpu-bus-width 64"
+    --mico-vpu-width 128 "
