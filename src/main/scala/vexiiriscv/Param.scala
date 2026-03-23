@@ -182,9 +182,9 @@ class ParamSimple() {
   var gshareBytes = 4 KiB
   val prefetcherRptParam = new PrefetcherRptParam()
 
-  var withMiCo = false
-  var micoWidth = 32
-  var micoStaged = false
+  // var withMiCo = false
+  // var micoWidth = 32
+  // var micoStaged = false
 
   var fetchTsp = MmuStorageParameter(
     levels = List(
@@ -912,7 +912,7 @@ class ParamSimple() {
     plugins += new SrcPlugin(early0, executeAt = 0, relaxedRs = relaxedSrc)
     plugins += new IntAluPlugin(early0, formatAt = 0)
     plugins += shifter(early0, formatAt = relaxedShift.toInt)
-    if(withMiCo) plugins += new MiCoMultiCyclePlugin(early0, staged = micoStaged, simdWidth=micoWidth)
+    // if(withMiCo) plugins += new MiCoMultiCyclePlugin(early0, staged = micoStaged, simdWidth=micoWidth)
     // if (withMiCo) plugins += new MiCoPluginV2(early0)
     plugins += new IntFormatPlugin(lane0)
     plugins += new BranchPlugin(layer=early0, aluAt=0, jumpAt=relaxedBranch.toInt, wbAt=0)

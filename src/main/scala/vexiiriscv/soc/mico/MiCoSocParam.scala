@@ -1,7 +1,7 @@
 package vexiiriscv.soc.mico
 
 import spinal.core._
-import vexiiriscv.ParamSimple
+import vexiiriscv.ParamMiCo
 import vexiiriscv.soc.micro.SocCtrlParam
 
 import java.io.File
@@ -12,7 +12,7 @@ class MiCoSocParam {
   var ramElf = Option.empty[File]
   var ramBlackBox = false
   var blackBoxASIC = false
-  val vexii = new ParamSimple()
+  val vexii = new ParamMiCo()
   val socCtrl = new SocCtrlParam()
   var withSpiFlash = false
 
