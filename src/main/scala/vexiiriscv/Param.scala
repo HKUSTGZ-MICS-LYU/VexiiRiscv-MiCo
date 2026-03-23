@@ -23,7 +23,7 @@ import vexiiriscv.schedule.DispatchPlugin
 import vexiiriscv.test.WhiteboxerPlugin
 
 import java.security.MessageDigest
-import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.{ArrayBuffer, Set}
 import scala.util.Random
 
 
@@ -99,11 +99,11 @@ object ParamSimple{
  */
 class ParamSimple() {
   var xlen = 32
-  var withRvc = false
+  var withISA = Set[String]("i", "zicsr", "zifencei")
   var withAlignerBuffer = false
   var withDispatcherBuffer = false
   var hartCount = 1
-  var withMmu = false
+  var disableMmu = false
   var asidWidth = 0
   var physicalWidth = 32
   var resetVector = 0x80000000l
@@ -119,13 +119,6 @@ class ParamSimple() {
   var withRas = false
   var withLateAlu = false
   var storeRs2Late = false
-  var withMul = false
-  var withDiv = false
-  var withRva = false
-  var withRvf = false
-  var withRve = false
-  var withRvcbm = false
-  var withRvZknAes = false
   var withRvcbmLlc = false
   var withTesterPlugin = false
   var gshareBanks = 1
@@ -134,13 +127,7 @@ class ParamSimple() {
   var fpuWbAt = 2
   var fpuMulParam = FpuMulParam()
   var fpuAddSharedParam = FpuAddSharedParam()
-  var withRvd = false
-  var withRvZba = false
-  var withRvZbb = false
-  var withRvZbc = false
-  var withRvZbs = false
   var withWhiteboxerOutputs = false
-  var withIndirectCsr = false
   var privParam = PrivilegedParam.base
   var lsuForkAt = 0
   var lsuPmaAt = 0
@@ -154,8 +141,6 @@ class ParamSimple() {
   var relaxedMulInputs = false
   var allowBypassFrom = 100 //100 => disabled
   var additionalPerformanceCounters = 0
-  var withPerformanceCounters = false
-  var withPerformanceScountovf = true // Disabled to keep in sync with RVLS
   var fetchL1Enable = false
   var fetchL1Sets = 64
   var fetchL1Ways = 1
@@ -195,6 +180,7 @@ class ParamSimple() {
   var mulKeepSrc = false
   var withCfu = false
   var gshareBytes = 4 KiB
+  val prefetcherRptParam = new PrefetcherRptParam()
 
   var withMiCo = false
   var micoWidth = 32
@@ -298,7 +284,6 @@ class ParamSimple() {
   //  Debug modifiers
   val debugParam = sys.env.getOrElse("VEXIIRISCV_DEBUG_PARAM", "0").toInt.toBoolean
   if(debugParam) {
-    withPerformanceCounters = true
     additionalPerformanceCounters = 4
     regFileSync = false
     allowBypassFrom = 0
@@ -337,22 +322,15 @@ class ParamSimple() {
 //    lanes = 2
 //    storeRs2Late = true
 //    withLateAlu = true
-    withMul = true
-    withDiv = true
     withDispatcherBuffer = true
     withAlignerBuffer = true
-    withRvc = true
-    withRva = true
-
-    withRvf = true
-    withRvd = true
 //    fpuIgnoreSubnormal = true
 //    fpuFmaFullAccuracy = false
 
-    withMmu = true
     privParam.withSupervisor = true
     privParam.withUser = true
     xlen = 64
+    addISA("m", "a", "f", "d", "c", "s", "u", "zihpm", "zicntr")
 //    physicalWidth = 38
 
 
@@ -399,8 +377,7 @@ class ParamSimple() {
 
   // Define a few utilities to mutate the ParamSimple
   def withRvm(): Unit = {
-    withMul = true
-    withDiv = true
+    addISA("m")
   }
   def withBranchPredicton(): Unit = {
     withBtb = true
@@ -419,9 +396,9 @@ class ParamSimple() {
     withLsuBypass = true
   }
   def withLinux(): Unit = {
+    addISA("s", "u")
     privParam.withSupervisor = true
     privParam.withUser = true;
-    withMmu = true
   }
   def withMmuSyncRead(): Unit = {
     fetchTsp = MmuStorageParameter(
@@ -496,6 +473,65 @@ class ParamSimple() {
       }
     }
     Math.abs(md.toString.hashCode())
+  }
+
+  def addISA(exts: String*): Unit = withISA ++= exts.map(_.toLowerCase())
+  def removeISA(exts: String*): Unit = withISA --= exts.map(_.toLowerCase())
+  def checkISA(exts: String*) = exts.map(withISA contains _.toLowerCase()).reduce(_ && _)
+
+  def withRve = checkISA("e")
+  def withRva = checkISA("a")
+  def withRvf = checkISA("f")
+  def withRvd = checkISA("f", "d")
+  def withRvc = checkISA("c")
+  def withRvcbm = checkISA("zicbom")
+  def withRvZknAes = checkISA("zkne") || checkISA("zknd")
+  def withRvZba = checkISA("zba")
+  def withRvZbb = checkISA("zbb")
+  def withRvZbc = checkISA("zbc")
+  def withRvZbs = checkISA("zbs")
+  def withRvb = checkISA("zba", "zbb", "zbc", "zbs")
+  def withSscofpmf = checkISA("sscofpmf")
+  def withSstc = checkISA("sstc")
+  def withSxaia = checkISA("smaia") || checkISA("ssaia")
+
+  def withMul = checkISA("m") || checkISA("zmmul")
+  def withDiv = checkISA("m")
+  def withMmu = checkISA("s") && !disableMmu
+  def withRdTime = checkISA("zicntr")
+  def withSupervisor = checkISA("s")
+  def withUser = checkISA("u")
+  def withHypervisor = checkISA("h")
+  def withIndirectCsr = checkISA("smcsrind") || checkISA("sscsrind")
+  def withPerformanceCounters = checkISA("zihpm") || checkISA("zicntr")
+  def withPerformanceScountovf = checkISA("sscofpmf")
+  def withInterrutpFilter = checkISA("ssaia")
+
+  def fixIsaParams() = {
+    if(checkISA("h")) addISA("s")
+    if(checkISA("s")) addISA("u")
+
+    if(checkISA("g")) addISA("i", "m", "a", "f", "d", "s", "u")
+    if(checkISA("b")) {
+      addISA("zba", "zbb", "zbc", "zbs")
+      removeISA("b")
+    }
+
+    if(privParam.imsicInterrupts > 0) addISA("smaia", "ssaia")
+    if(withSxaia) addISA("smcsrind", "sscsrind")
+
+    if(!checkISA("s")) {
+      removeISA("sscsrind", "ssaia", "sstc")
+    }
+    if(checkISA("zihpm") || withSstc) addISA("zicntr")
+
+    if(withSupervisor) privParam.withSupervisor = true
+    if(withHypervisor) privParam.withHypervisor = true
+    if(withUser) privParam.withUser = true
+    if(withSstc) privParam.withSSTC = true
+    if(withRdTime) privParam.withRdTime = true
+    if(withInterrutpFilter) privParam.withInterrutpFilter = true
+    if(withRvc) withAlignerBuffer = true
   }
 
   // Generate a human redable name from most of the supported configuration
@@ -574,24 +610,23 @@ class ParamSimple() {
       fpuAddSharedParam.packAt = 2
       fpuWbAt = 1
     }
-    opt[Unit]("with-mul").unbounded() action { (v, c) => withMul = true }
-    opt[Unit]("with-div").unbounded() action { (v, c) => withDiv = true }
-    opt[Unit]("with-rvm") action { (v, c) => withMul = true; withDiv = true }
-    opt[Unit]("with-rve") action { (v, c) => withRve = true }
-    opt[Unit]("with-rva") action { (v, c) => withRva = true }
-    opt[Unit]("with-rvf") action { (v, c) => withRvf = true }
-    opt[Unit]("with-rvd") action { (v, c) => withRvd = true; withRvf = true }
-    opt[Unit]("with-rvc") action { (v, c) => withRvc = true; withAlignerBuffer = true }
-    opt[Unit]("with-rvZb") action { (v, c) => withRvZba = true; withRvZbb = true; withRvZbc = true; withRvZbs = true }
-    opt[Unit]("with-rvZba") action { (v, c) => withRvZba = true }
-    opt[Unit]("with-rvZbb") action { (v, c) => withRvZbb = true }
-    opt[Unit]("with-rvZbc") action { (v, c) => withRvZbc = true }
-    opt[Unit]("with-rvZbs") action { (v, c) => withRvZbs = true }
-    opt[Unit]("with-rvZcbm") action { (v, c) => withRvcbm = true }
-    opt[Unit]("with-rvZcbm-llc") action { (v, c) => withRvcbm = true; withRvcbmLlc = true }
-    opt[Unit]("with-rvZknAes") action { (v, c) => withRvZknAes = true }
-    opt[Unit]("with-sxaia") action { (v, c) => privParam.withInterrutpFilter = true }
-    opt[Int]("imsic-interrupt-number") action { (v, c) => withIndirectCsr = true; privParam.withInterrutpFilter = true; privParam.imsicInterrupts = v }
+    opt[Seq[String]]("with-isa").unbounded() action { (v, c) => addISA(v: _*) }
+    opt[Unit]("with-rvm") action { (v, c) => addISA("m") }
+    opt[Unit]("with-rve") action { (v, c) => addISA("e"); removeISA("i") }
+    opt[Unit]("with-rva") action { (v, c) => addISA("a") }
+    opt[Unit]("with-rvf") action { (v, c) => addISA("f") }
+    opt[Unit]("with-rvd") action { (v, c) => addISA("f", "d") }
+    opt[Unit]("with-rvc") action { (v, c) => addISA("c") }
+    opt[Unit]("with-rvZb") action { (v, c) => addISA("zba", "zbb", "zbc", "zbs") }
+    opt[Unit]("with-rvZba") action { (v, c) => addISA("zba") }
+    opt[Unit]("with-rvZbb") action { (v, c) => addISA("zbb") }
+    opt[Unit]("with-rvZbc") action { (v, c) => addISA("zbc") }
+    opt[Unit]("with-rvZbs") action { (v, c) => addISA("zbs") }
+    opt[Unit]("with-rvZcbm") action { (v, c) => addISA("zicbom"); }
+    opt[Unit]("with-rvZcbm-llc") action { (v, c) => addISA("zicbom"); withRvcbmLlc = true }
+    opt[Unit]("with-rvZknAes") action { (v, c) => addISA("zkne", "zknd") }
+    opt[Unit]("with-sxaia") action { (v, c) => addISA("smaia", "ssaia") }
+    opt[Int]("imsic-interrupt-number") action { (v, c) => addISA("smcsrind", "sscsrind", "smaia", "ssaia"); privParam.imsicInterrupts = v }
     opt[Unit]("with-whiteboxer-outputs") action { (v, c) => withWhiteboxerOutputs = true }
     opt[Unit]("with-hart-id-input") action { (v, c) => withHartIdInput = true }
     opt[Unit]("with-hart-id-input-defaulted") action { (v, c) => privParam.withHartIdInputDefaulted = true }
@@ -599,14 +634,14 @@ class ParamSimple() {
     opt[Unit]("fpu-ignore-subnormal") action { (v, c) => fpuIgnoreSubnormal = true }
     opt[Unit]("with-aligner-buffer").unbounded() action { (v, c) => withAlignerBuffer = true }
     opt[Unit]("with-dispatcher-buffer") action { (v, c) => withDispatcherBuffer = true }
-    opt[Unit]("with-supervisor") action { (v, c) => privParam.withSupervisor = true; privParam.withUser = true; withMmu = true }
-    opt[Unit]("with-user") action { (v, c) => privParam.withUser = true }
-    opt[Unit]("without-mmu") action { (v, c) => withMmu = false }
-    opt[Unit]("without-mul") action { (v, c) => withMul = false }
-    opt[Unit]("without-div") action { (v, c) => withDiv = false }
+    opt[Unit]("with-supervisor") action { (v, c) => addISA("s", "u") }
+    opt[Unit]("with-user") action { (v, c) => addISA("u") }
+    opt[Unit]("without-mmu") action { (v, c) => disableMmu = false }
+    opt[Unit]("without-mul") action { (v, c) => removeISA("m", "zmmul") }
+    opt[Unit]("without-div") action { (v, c) => if(checkISA("m")) {removeISA("m"); addISA("zmmul")} }
     opt[Unit]("with-tester-plugin") action { (v, c) => withTesterPlugin = true }
-    opt[Unit]("with-mul") action { (v, c) => withMul = true }
-    opt[Unit]("with-div") action { (v, c) => withDiv = true }
+    opt[Unit]("with-mul") action { (v, c) => addISA("zmmul") }
+    opt[Unit]("with-div") action { (v, c) => addISA("m") }
     opt[Unit]("with-gshare") action { (v, c) => withGShare = true }
     opt[Unit]("with-btb") action { (v, c) => withBtb = true }
     opt[Unit]("with-ras") action { (v, c) => withRas = true }
@@ -615,6 +650,7 @@ class ParamSimple() {
     opt[Unit]("btb-single-port-ram") action { (v, c) => btbDualPortRam = false }
     opt[Unit]("with-late-alu") action { (v, c) => withLateAlu = true; allowBypassFrom = 0; storeRs2Late = true }
     opt[Unit]("with-store-rs2-late") action { (v, c) => storeRs2Late = true }
+    opt[Unit]("without-late-alu") action { (v, c) => withLateAlu = false; storeRs2Late = false }
     opt[Int]("btb-sets") action { (v, c) => btbSets = v }
     opt[Int]("btb-hash-width") action { (v, c) => btbHashWidth = v }
     opt[Unit]("regfile-async") action { (v, c) => regFileSync = false }
@@ -623,9 +659,9 @@ class ParamSimple() {
     opt[Unit]("regfile-infer-ports") action { (v, c) => regFileDualPortRam = false }
     opt[Unit]("regfile-reg-based") action { (v, c) => regFileRegBasedRam = true; regFileDualPortRam = false}
     opt[Int]("allow-bypass-from") action { (v, c) => allowBypassFrom = v }
-    opt[Unit]("with-indirect-csr") action { (v, c) => withIndirectCsr = true }
-    opt[Int]("performance-counters").unbounded() action { (v, c) => withPerformanceCounters = true; additionalPerformanceCounters = v }
-    opt[Unit]("without-performance-scountovf").unbounded() action { (v, c) => withPerformanceScountovf = false }
+    opt[Unit]("with-indirect-csr") action { (v, c) => addISA("smcsrind", "sscsrind") }
+    opt[Int]("performance-counters").unbounded() action { (v, c) => addISA("zicntr", "zihpm"); additionalPerformanceCounters = v }
+    opt[Unit]("without-performance-scountovf").unbounded() action { (v, c) => removeISA("sscofpmf") }
     opt[Unit]("with-fetch-l1").unbounded() action { (v, c) => fetchL1Enable = true }
     opt[Unit]("with-lsu-l1") action { (v, c) => lsuL1Enable = true }
     opt[Unit]("fetch-axi4") action { (v, c) => fetchBus = FetchBusEnum.axi4 }
@@ -650,6 +686,7 @@ class ParamSimple() {
     opt[Unit]("lsu-l1-tags-read-async") action { (v, c) =>  lsuL1TagsReadAsync = true }
     opt[String]("lsu-hardware-prefetch") action { (v, c) => lsuHardwarePrefetch = v }
     opt[Unit]("lsu-software-prefetch") action { (v, c) => lsuSoftwarePrefetch = true }
+    opt[Int]("lsu-rpt-block-ahead-max") action { (v, c) => prefetcherRptParam.blockAheadMax = v }
     opt[Int]("lsu-l1-refill-count") action { (v, c) => lsuL1RefillCount = v }
     opt[Int]("lsu-l1-writeback-count") action { (v, c) => lsuL1WritebackCount = v }
     opt[Int]("lsu-l1-mem-data-width-min").unbounded() action { (v, c) => lsuMemDataWidthMin = v }
@@ -666,8 +703,8 @@ class ParamSimple() {
     opt[Unit]("debug-privileged") action { (v, c) => privParam.withDebug = true }
     opt[Int] ("debug-triggers") action { (v, c) => privParam.debugTriggers = v }
     opt[Unit]("debug-triggers-lsu") action { (v, c) => privParam.debugTriggersLsu = true }
-    opt[Unit]("debug-jtag-tap") action { (v, c) => embeddedJtagTap = true }
-    opt[Unit]("debug-jtag-instruction") action { (v, c) => embeddedJtagInstruction = true }
+    opt[Unit]("debug-jtag-tap") action { (v, c) => embeddedJtagTap = true; privParam.withDebug = true }
+    opt[Unit]("debug-jtag-instruction") action { (v, c) => embeddedJtagInstruction = true; privParam.withDebug = true }
     opt[Unit]("with-boot-mem-init") action { (v, c) => bootMemClear = true }
     opt[Int]("physical-width") action { (v, c) => physicalWidth = v }
     opt[Unit]("mul-keep-src") action { (v, c) => mulKeepSrc = true }
@@ -675,8 +712,8 @@ class ParamSimple() {
     opt[Int]("pmp-size") action { (v, c) => pmpParam.pmpSize = v }
     opt[Int]("pmp-granularity") action { (v, c) => pmpParam.granularity = v }
     opt[Unit]("pmp-tor-disable") action { (v, c) => pmpParam.withTor = false }
-    opt[Unit]("with-rdtime") action { (v, c) => privParam.withRdTime = true }
-    opt[Unit]("with-sstc") action { (v, c) => privParam.withSSTC = true }
+    opt[Unit]("with-rdtime") action { (v, c) => addISA("zicntr") }
+    opt[Unit]("with-sstc") action { (v, c) => addISA("sstc") }
     opt[Unit]("with-cfu") action { (v, c) => withCfu = true }
     opt[Int]("asid-width") action{ (v,c) => asidWidth = v }
     opt[Int]("gshare-bytes") action{ (v,c) => gshareBytes = v }
@@ -706,9 +743,10 @@ class ParamSimple() {
       lsuSoftwarePrefetch = true
       lsuHardwarePrefetch = "rpt"
     }
-    opt[Unit]("mico") action { (v, c) => withMiCo = true}
-    opt[Int]("mico-width") action { (v, c) => micoWidth = v}
-    opt[Unit]("mico-staged") action { (v, c) => micoStaged = true}
+    checkConfig(c => {
+      fixIsaParams()
+      success
+    })
   }
 
   // Generate the VexiiRiscv plugin list out of the current SimpleParam configuration
@@ -716,6 +754,8 @@ class ParamSimple() {
   def pluginsArea(hartId : Int = 0) = new Area {
     val plugins = ArrayBuffer[Hostable]()
     if(withLateAlu) assert(allowBypassFrom == 0)
+    if(withMmu && lsuL1Enable) assert(lsuL1Sets <= 64, "MMU require not more than 64 sets in the LSU L1")
+    if(withMmu && fetchL1Enable) assert(fetchL1Sets <= 64, "MMU require not more than 64 sets in the FETCH L1")
 
     val intWritebackAt = 2 //Alias for "trap at" as well
 
@@ -988,7 +1028,7 @@ class ParamSimple() {
         case "none" =>
         case "nl" => plugins += new lsu.PrefetcherNextLinePlugin
         case "rpt" => plugins += new lsu.PrefetcherRptPlugin(
-          sets = 128,
+          p = prefetcherRptParam,
           bootMemClear = bootMemClear
         )
       }
@@ -1023,9 +1063,9 @@ class ParamSimple() {
     }
 
     plugins += new CsrRamPlugin()
-    if(withPerformanceCounters) plugins += new PerformanceCounterPlugin(additionalCounterCount = additionalPerformanceCounters)
+    if(withPerformanceCounters) plugins += new PerformanceCounterPlugin(additionalCounterCount = additionalPerformanceCounters, withScountovf = withSscofpmf)
     plugins += new CsrAccessPlugin(early0, writeBackKey =  if(lanes == 1) "lane0" else "lane1")
-    if(withIndirectCsr) plugins += new IndirectCsrPlugin(privParam.withSupervisor)
+    if(withIndirectCsr) plugins += new IndirectCsrPlugin(checkISA("sscsrind"))
     plugins += new PrivilegedPlugin(privParam, withHartIdInput.mux(null, hartId until hartId+hartCount))
     plugins += new TrapPlugin(trapAt = intWritebackAt)
     if(withTesterPlugin) plugins += new TesterPlugin()

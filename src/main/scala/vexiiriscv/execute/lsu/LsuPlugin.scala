@@ -13,7 +13,7 @@ import spinal.lib.misc.plugin.FiberPlugin
 import spinal.lib.system.tag.PmaRegion
 import vexiiriscv.decode.{Decode, DecoderService}
 import vexiiriscv.decode.Decode.UOP
-import vexiiriscv.memory.{AddressTranslationPortUsage, AddressTranslationService, DBusAccessService, PmaLoad, PmaLogic, PmaPort, PmaStore, PmpService}
+import vexiiriscv.memory.{AddressTranslationPortUsage, AddressTranslationReq, AddressTranslationService, DBusAccessService, PmaLoad, PmaLogic, PmaPort, PmaStore, PmpService}
 import vexiiriscv.misc.{AddressToMask, LsuTriggerService, PerformanceCounterService, PrivilegedPlugin, TrapArg, TrapReason, TrapService}
 import vexiiriscv.riscv.Riscv.{FLEN, LSLEN, XLEN}
 import vexiiriscv.riscv._
@@ -219,7 +219,7 @@ class LsuPlugin(var layer : LaneLayer,
       val invalIntoClean = False
       def xenvcfg(priv : Int) = new Area{
         val at = 0x00A + priv * 0x100
-        if(priv == 3) cap.allowCsr(at + 0x10) //Allow menvcfgh
+        if(priv == PrivilegeMode.M) cap.allowCsr(at + 0x10) //Allow menvcfgh
         val privLower = pp.getPrivilege(0) < priv
         val cbie = RegInit(B"00")
         val cbcfe = RegInit(B"0")
@@ -237,8 +237,8 @@ class LsuPlugin(var layer : LaneLayer,
       ds.addMicroOpDecoding(Rvi.CBM_FLUSH, CLEAN, True)
       ds.addMicroOpDecoding(Rvi.CBM_INVALIDATE, INVALIDATE, True)
 
-      val menvcfg = xenvcfg(3)
-      val senvcfg = pp.implementSupervisor generate xenvcfg(1)
+      val menvcfg = xenvcfg(PrivilegeMode.M)
+      val senvcfg = pp.implementSupervisor generate xenvcfg(PrivilegeMode.S)
     }
 
     val injectCtrl = elp.ctrl(0)
@@ -402,10 +402,17 @@ class LsuPlugin(var layer : LaneLayer,
     // Collect the different request and interface them with the L1 cache as well as the MMU
     val onAddress0 = new elp.Execute(addressAt){
       FORCE_PHYSICAL := FROM_ACCESS || FROM_WB
+      val LOAD_MMU = insert(LOAD || CLEAN || INVALIDATE)
+      val request = AddressTranslationReq(
+        PRE_ADDRESS    = l1.MIXED_ADDRESS,
+        LOAD           = LOAD_MMU,
+        STORE          = STORE,
+        EXECUTE        = insert(False),
+        FORCE_PHYSICAL = FORCE_PHYSICAL
+      )
       val translationPort = ats.newTranslationPort(
         nodes = Seq(elp.execute(addressAt).down, elp.execute(addressAt+1).down),
-        rawAddress = l1.MIXED_ADDRESS,
-        forcePhysical = FORCE_PHYSICAL,
+        req = request,
         usage = AddressTranslationPortUsage.LOAD_STORE,
         portSpec = translationPortParameter,
         storageSpec = translationStorage
@@ -472,6 +479,22 @@ class LsuPlugin(var layer : LaneLayer,
         }
       }
 
+      // Accesses comming from the hardware prefetcher
+      val fromHp = hp.nonEmpty generate new Area {
+        val feed = hp.get.io.get
+        val port = ports.addRet(Stream(LsuL1Cmd()))
+        port.arbitrationFrom(feed)
+        port.op := LsuL1CmdOpcode.PREFETCH
+        port.address := feed.address
+        port.store := feed.unique
+        port.size := 0
+        port.load := False
+        port.atomic := False
+        port.clean := False
+        port.invalidate := False
+        port.storeId := 0
+      }
+
       // Accesses comming from the store buffer which attempts to retry a failed store
       val sb = withStoreBuffer generate new Area {
         val isHead = storeBuffer.pop.ptr === storeBuffer.ops.freePtr
@@ -488,22 +511,6 @@ class LsuPlugin(var layer : LaneLayer,
         port.op := LsuL1CmdOpcode.STORE_BUFFER
         storeBuffer.pop.ready := port.ready || flush
         port.storeId := storeBuffer.pop.op.storeId
-      }
-
-      // Accesses comming from the hardware prefetcher
-      val fromHp = hp.nonEmpty generate new Area {
-        val feed = hp.get.io.get
-        val port = ports.addRet(Stream(LsuL1Cmd()))
-        port.arbitrationFrom(feed)
-        port.op := LsuL1CmdOpcode.PREFETCH
-        port.address := feed.address
-        port.store := feed.unique
-        port.size := 0
-        port.load := False
-        port.atomic := False
-        port.clean := False
-        port.invalidate := False
-        port.storeId := 0
       }
 
       // Let's arbitrate all those request and connect the atrbitred output to the pipeline / L1
@@ -581,7 +588,7 @@ class LsuPlugin(var layer : LaneLayer,
       val IO = insert(CACHED_RSP.fault && !IO_RSP.fault && !FENCE && !FROM_PREFETCH)
       val addressExtension = ats.getSignExtension(AddressTranslationPortUsage.LOAD_STORE, srcp.ADD_SUB.asUInt)
       val FROM_LSU_MSB_FAILED = insert(FROM_LSU && srcp.ADD_SUB.dropLow(Global.MIXED_WIDTH).asBools.map(_ =/= addressExtension).orR)
-      MMU_PAGE_FAULT := tpk.PAGE_FAULT || STORE.mux(!tpk.ALLOW_WRITE, !tpk.ALLOW_READ)
+      MMU_PAGE_FAULT := tpk.PAGE_FAULT
       MMU_FAILURE := MMU_PAGE_FAULT || tpk.ACCESS_FAULT || tpk.REFILL || tpk.HAZARD || FROM_LSU_MSB_FAILED
     }
 
@@ -604,7 +611,7 @@ class LsuPlugin(var layer : LaneLayer,
       val io = new Area {
         // Give one cycle delay, allowing trap to happen before the IO access is emitted.
         val tooEarly = RegNext(True) clearWhen(elp.isFreezed()) init(False)
-         
+
         val allowIt = RegNext(False) setWhen(!lsuTrap && !isCancel && FROM_LSU && !l1.CLEAN && !l1.INVALID) init(False)
         val doIt = isValid && l1.SEL && onPma.IO
         val doItReg = RegNext(doIt) init(False)
@@ -997,14 +1004,14 @@ class LsuPlugin(var layer : LaneLayer,
       }
 
       // Drive the commitProbe bus
-      val commitProbeReq = down.isFiring && SEL && FROM_LSU
-      val commitProbeToken = RegNextWhen(lsuTrap, commitProbeReq) init(False) // Avoid to spam on consicutive failure
-      commitProbe.valid := down.isFiring && SEL.mux[Bool](FROM_LSU && (!lsuTrap || !commitProbeToken) && (l1.LOAD || l1.STORE || l1.PREFETCH), FROM_PREFETCH && HAZARD) // && !l1.REFILL_HIT
+      val commitProbeReq = down.isFiring && SEL && FROM_LSU && (l1.LOAD || l1.STORE) && !l1.PREFETCH && !l1.ATOMIC  && !l1.FLUSH && !l1.CLEAN && !l1.INVALID
+      val commitProbeToken = RegNextWhen(lsuTrap, commitProbeReq) init(False) // Avoid to spam on consecutive failure
+      commitProbe.valid := commitProbeReq && !commitProbeToken
       commitProbe.address := l1.MIXED_ADDRESS
       commitProbe.load := l1.LOAD
       commitProbe.store := l1.STORE
       commitProbe.trap := lsuTrap
-      commitProbe.miss := l1.MISS && !l1.HAZARD && !MMU_FAILURE
+      commitProbe.miss := (l1.MISS || l1.MISS_UNIQUE || l1.HAZARD) && !MMU_FAILURE && withStoreBuffer.mux(!(l1.STORE && wb.hit), True) //We threat most L1 failure as a miss (pessimistic)
       commitProbe.io := onPma.IO
       commitProbe.prefetchFailed := FROM_PREFETCH
       commitProbe.pc := Global.PC

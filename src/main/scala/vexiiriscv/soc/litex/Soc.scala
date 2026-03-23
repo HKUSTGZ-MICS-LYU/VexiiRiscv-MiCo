@@ -80,6 +80,7 @@ class SocConfig(){
   var l2Bytes = 0
   var l2Ways = 0
   var cpuCount = 1
+  var debugSysBus = false
   var litedramWidth = 32
   var withAxi3 = false
   var withPeripheralCd = false
@@ -90,6 +91,14 @@ class SocConfig(){
   var withCpuCd = false
   var withAPlic = false
   var axiLiteForce32 = true
+  var deviceMapping = mutable.LinkedHashMap[String, BigInt](
+    "clint"   -> 0xF0010000l,
+    "plic"    -> 0xF0C00000l,
+    "aplic_m" -> 0xF0C00000l,
+    "aplic_s" -> 0xF0E00000l,
+    "imsic_m" -> 0xF1000000l,
+    "imsic_s" -> 0xF1200000l,
+  )
 
   def addOptions(parser: scopt.OptionParser[Unit]): Unit = {
     import parser._
@@ -104,6 +113,7 @@ class SocConfig(){
     opt[Int]("cpu-count") action { (v, c) => cpuCount = v }
     opt[Int]("l2-bytes") action { (v, c) => l2Bytes = v }
     opt[Int]("l2-ways") action { (v, c) => l2Ways = v }
+    opt[Boolean]("debug-sysbus") action { (v, c) => debugSysBus = v }
     opt[Unit]("with-dma") action { (v, c) => withDma = true }
     opt[Unit]("with-cpu-clk") action { (v, c) => withCpuCd = true }
     opt[Unit]("with-axi3") action { (v, c) => withAxi3 = true }
@@ -112,7 +122,7 @@ class SocConfig(){
     opt[Unit]("with-debug-probe-pc0") text("Allows to profile the CPU via JTAG. See ElfMapper.") action { (v, c) => withDebugProbePc0 = true }
     opt[Unit]("with-aplic") action { (v, c) => withAPlic = true }
     opt[Unit]("with-axilite-xlen") action { (v, c) => axiLiteForce32 = false }
-
+    opt[Map[String, BigInt]]("device-region").unbounded() action { (v, c) => deviceMapping ++= v }
     opt[Seq[String]]("memory-region").unbounded() action { (v, c) =>
       assert(v.length == 4, "--memory-region need 4 parameters")
       val r = new LitexMemoryRegion(SizeMapping(BigInt(v(0)), BigInt(v(1))), v(2), v(3))
@@ -164,6 +174,12 @@ class Soc(c : SocConfig) extends Component {
   cpuResetCtrl.addAsyncReset(litexCd.isResetActive, HIGH)
   val cpuCd = cpuResetCtrl.cd
 
+  val debugReset = c.withDebug generate in.Bool()
+  val debug = c.withDebug generate ClockDomain(cpuCd.clock, debugReset)(new DebugModuleSocFiber(withJtagTap, withJtagInstruction) {
+    out(dm.ndmreset)
+    dm.dmp.withSysBus = c.debugSysBus
+  })
+  val debugSysBus = c.debugSysBus generate cpuCd(debug.dm.makeSysbusTilelink())
 
   val system = cpuCd on new AreaRoot {
     val mainDataWidth = vexiiParam.memDataWidth
@@ -235,7 +251,7 @@ class Soc(c : SocConfig) extends Component {
       bus.forceDataWidth(32)
 
       val clint = new TilelinkClintFiber()
-      clint.node at 0xF0010000l of bus
+      clint.node at deviceMapping("clint") of bus
 
       for (vexii <- vexiis) {
         vexii.bind(clint)
@@ -246,7 +262,7 @@ class Soc(c : SocConfig) extends Component {
 
         val m = new Area {
           val intc = new TilelinkAPlicFiber(APlicDomainParam.root(param))
-          intc.node at 0xF0C00000l of bus
+          intc.node at deviceMapping("aplic_m") of bus
 
           for (vexii <- vexiis) {
             vexii.bind(intc)
@@ -255,7 +271,7 @@ class Soc(c : SocConfig) extends Component {
 
         val s = withSupervisor generate new Area {
           val intc = new TilelinkAPlicFiber(APlicDomainParam.S(param))
-          intc.node at 0xF0E00000l of bus
+          intc.node at deviceMapping("aplic_s") of bus
 
           m.intc.addChildCtrl(intc)
 
@@ -287,7 +303,7 @@ class Soc(c : SocConfig) extends Component {
 
         val m = new Area {
           val msi = TilelinkImsicTriggerFiber()
-          msi.node at 0xF1000000l of bus
+          msi.node at deviceMapping("imsic_m") of bus
 
           for (vexii <- vexiis) {
             vexii.bind(msi, 3)
@@ -296,7 +312,7 @@ class Soc(c : SocConfig) extends Component {
 
         val s = withSupervisor generate new Area {
           val msi = TilelinkImsicTriggerFiber()
-          msi.node at 0xF1200000l of bus
+          msi.node at deviceMapping("imsic_s") of bus
 
           for (vexii <- vexiis) {
             vexii.bind(msi, 1)
@@ -306,7 +322,7 @@ class Soc(c : SocConfig) extends Component {
 
       val plic = !withAPlic generate new Area {
         val intc = new TilelinkPlicFiber()
-        intc.node at 0xF0C00000l of bus
+        intc.node at deviceMapping("plic") of bus
 
         for (vexii <- vexiis) {
           vexii.bind(intc)
@@ -422,6 +438,7 @@ class Soc(c : SocConfig) extends Component {
           mBus << List(vexii.iBus, vexii.lsuL1Bus)
           ioBus << List(vexii.dBus)
         }
+        if(c.debugSysBus) mBus << debugSysBus.filter.down
       }
 
       val wc = withCoherency generate new Area {
@@ -431,6 +448,8 @@ class Soc(c : SocConfig) extends Component {
           cBus << List(vexii.iBus, vexii.lsuL1Bus)
           ioBus << List(vexii.dBus)
         }
+
+        if(c.debugSysBus) cBus << debugSysBus.filter.down
 
         for (video <- video) cBus << video.ctrl.dma
         if(dmaFilter != null) cBus << dmaFilter.down
@@ -503,11 +522,7 @@ class Soc(c : SocConfig) extends Component {
     }
   }
 
-  val debugReset = c.withDebug generate in.Bool()
-  val debug = c.withDebug generate ClockDomain(cpuCd.clock, debugReset)(new DebugModuleSocFiber(withJtagTap, withJtagInstruction) {
-    out(dm.ndmreset)
-    system.vexiis.foreach(bindHart)
-  })
+  if(c.withDebug) system.vexiis.foreach(debug.bindHart)
 
   if(c.withDebugProbePc0) {
     debug.dm.p.probeWidth = 32
@@ -579,6 +594,7 @@ object PythonArgsGen extends App{
   assert(new scopt.OptionParser[Unit]("Vexii") {
     help("help").text("prints this usage text")
     vexiiParam.addOptions(this)
+    opt[Boolean]("debug-sysbus") action { (v, c) =>  }
     opt[String]("python-file") action { (v, c) => pythonPath = v }
 
   }.parse(args, ()).nonEmpty)
