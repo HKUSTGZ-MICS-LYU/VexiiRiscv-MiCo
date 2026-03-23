@@ -1,0 +1,23 @@
+sbt "runMain vexiiriscv.tester.TestBench \
+    --with-rvc \
+    --with-rvf \
+    --with-mul \
+    --with-div \
+    --decoders 2 \
+    --lanes 2 \
+    --with-aligner-buffer \
+    --with-dispatcher-buffer \
+    --with-ras \
+    --with-btb \
+    --with-gshare \
+    --with-late-alu \
+    --regfile-async \
+    --allow-bypass-from 0 \
+    --div-radix 4 \
+    --lsu-l1 \
+    --lsu-l1-ways 2\
+    --fetch-l1 \
+    --fetch-l1-ways 2\
+    --load-elf $1 \
+    --no-rvls-check \
+    --print-stats"
