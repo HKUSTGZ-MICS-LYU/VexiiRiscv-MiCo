@@ -18,9 +18,9 @@ class ParamMiCo extends ParamSimple {
     opt[Unit]("mico") action { (v, c) => withMiCo = true }
     opt[Int]("mico-width") action { (v, c) => micoWidth = v }
     opt[Unit]("mico-staged") action { (v, c) => micoStaged = true }
-    opt[Unit]("bitnet") action { (v, c) => withBitNet = true }
     opt[String]("bitnet-qtype") action { (v, c) => bitNetQType = v }
     opt[Int]("bitnet-version") action { (v, c) => bitNetVersion = v }
+    opt[Unit]("bitnet") action { (v, c) => withBitNet = true }
   }
 
   override def plugins(hartId: Int = 0) = {
