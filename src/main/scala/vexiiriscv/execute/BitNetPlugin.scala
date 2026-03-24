@@ -13,7 +13,7 @@ import vexiiriscv.tester.TestOptions
 
 
 object BitNetPlugin{
-  //Define the instruction type and encoding that we wll use
+  //Define the instruction type and encoding that we will use
   val BNSUM   = IntRegFile.TypeR(M"0000000----------001-----0001011")
   def bitnetadd4(a: UInt, w : UInt, QType : String = "1.5b") : SInt = {
     val w_width = QType match {
@@ -106,7 +106,7 @@ class BitNetPlugin(
 }
 
 object BitNetBufferPlugin extends AreaObject{
-  //Define the instruction type and encoding that we wll use
+  //Define the instruction type and encoding that we will use
   val BNSUM   = IntRegFile.TypeR(M"0000000----------001-----0001011")
   val BNSTORE = IntRegFile.TypeR(M"0000000----------010-----0001011")
 
