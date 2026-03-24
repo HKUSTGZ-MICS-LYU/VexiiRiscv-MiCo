@@ -1,6 +1,6 @@
 package vexiiriscv
 
-import vexiiriscv.execute.MiCoMultiCyclePlugin
+import vexiiriscv.execute.{BitNetBufferPlugin, BitNetPlugin, MiCoMultiCyclePlugin}
 
 import java.lang.reflect.Modifier
 
@@ -8,6 +8,9 @@ class ParamMiCo extends ParamSimple {
   var withMiCo = false
   var micoWidth = 32
   var micoStaged = false
+  var withBitNet = false
+  var bitNetQType = "1.5b"
+  var bitNetVersion = 4
 
   override def addOptions(parser: scopt.OptionParser[Unit]) = {
     super.addOptions(parser)
@@ -15,6 +18,9 @@ class ParamMiCo extends ParamSimple {
     opt[Unit]("mico") action { (v, c) => withMiCo = true }
     opt[Int]("mico-width") action { (v, c) => micoWidth = v }
     opt[Unit]("mico-staged") action { (v, c) => micoStaged = true }
+    opt[Unit]("bitnet") action { (v, c) => withBitNet = true }
+    opt[String]("bitnet-qtype") action { (v, c) => bitNetQType = v }
+    opt[Int]("bitnet-version") action { (v, c) => bitNetVersion = v }
   }
 
   override def plugins(hartId: Int = 0) = {
@@ -22,6 +28,10 @@ class ParamMiCo extends ParamSimple {
     if(withMiCo) {
       pa.plugins += new MiCoMultiCyclePlugin(pa.early0, staged = micoStaged, simdWidth = micoWidth)
       // if(withMiCo) plugins += new MiCoPluginV2(early0)
+    }
+    if(withBitNet){
+      if(bitNetVersion == 4) pa.plugins += new BitNetPlugin(pa.early0, bitNetQType)
+      else pa.plugins += new BitNetBufferPlugin(pa.early0, bitNetQType, bitNetVersion)
     }
     pa.plugins
   }
@@ -33,9 +43,17 @@ class ParamMiCo extends ParamSimple {
     this
   }
 
+  def setBitNet(qType: String = "1.5b", version: Int = 4): this.type = {
+    withBitNet = true
+    bitNetQType = qType
+    bitNetVersion = version
+    this
+  }
+
   override def getName(): String = {
     val base = super.getName()
-    if(withMiCo) s"${base}_micoW${micoWidth}${if(micoStaged) "S" else ""}" else base
+    val withMiCoName = if(withMiCo) s"${base}_micoW${micoWidth}${if(micoStaged) "S" else ""}" else base
+    if(withBitNet) s"${withMiCoName}_bnV${bitNetVersion}Q${bitNetQType.replace(".", "p")}" else withMiCoName
   }
 
   // ParamSimple hashCode is based on getDeclaredFields of runtime class.

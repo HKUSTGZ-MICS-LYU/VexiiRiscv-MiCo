@@ -3,6 +3,7 @@
 VexiiRiscv-MiCo is a mixed-precision computing extension plugin for VexiiRiscv.
 
 You can find the MiCo plugin in scala class `vexiiriscv.execute.MiCoPlugin`.
+BitNet plugin classes are in `vexiiriscv.execute.BitNetPlugin`.
 
 ## MiCo Plugin
 
@@ -25,3 +26,11 @@ plugins += new BranchPlugin(layer=early0, aluAt=0, jumpAt=relaxedBranchtoInt, wb
 Then you can generate/simulate VexiiRiscv with MiCo Plugin, check the VexiiRiscv guides below.
 
 Due to the custom instructions added, please turn off RVLS when simulating (`--no-rvls-check`).
+
+## BitNet in ParamMiCo
+
+`ParamMiCo` also supports enabling the BitNet plugin path via:
+
+- `--bitnet`
+- `--bitnet-qtype 1.5b` (or `1b` / `2b`)
+- `--bitnet-version 4` (version 4 uses `BitNetPlugin`, other values use `BitNetBufferPlugin`)
