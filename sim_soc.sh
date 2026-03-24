@@ -19,6 +19,6 @@ sbt "runMain vexiiriscv.soc.mico.MiCoSocSim \
     --allow-bypass-from 0 \
     --div-radix 4 \
     --sparse-mem \
-    --mico-vpu \
-    --mico-vpu-len 256 \
-    --mico-vpu-width 128 "
+    --bitnet \
+    --bitnet-qtype 1b \
+    --bitnet-version 32 "

@@ -10,7 +10,7 @@ class ParamMiCo extends ParamSimple {
   var micoStaged = false
   var withBitNet = false
   var bitNetQType = "1.5b"
-  var bitNetVersion = 4
+  var bitNetVersion = 32
 
   override def addOptions(parser: scopt.OptionParser[Unit]) = {
     super.addOptions(parser)
