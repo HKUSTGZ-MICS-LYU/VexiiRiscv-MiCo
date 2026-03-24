@@ -15,7 +15,7 @@ import spinal.lib.misc.{Elf, TilelinkClintFiber}
 import spinal.lib.misc.plic.TilelinkPlicFiber
 import spinal.lib.system.tag.MemoryConnection
 import vexiiriscv.execute.cfu.{CfuPlugin, CfuTest}
-import vexiiriscv.soc.{TilelinkVexiiRiscvFiber, TilelinkCfuFiber}
+import vexiiriscv.soc.{DmaParameter, TilelinkDmaFiber, TilelinkVexiiRiscvFiber, TilelinkCfuFiber}
 import spinal.lib.bus.tilelink.coherent.{CacheFiber, HubFiber, SelfFLush}
 import spinal.lib.system.tag.PMA
 
@@ -81,6 +81,23 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
     // }
     if(memBus == null) memBus = mainBus // No L2, no Hub, the CPU is directly connected to the memory bus
     // memBus.forceDataWidth(p.vexii.memDataWidth)
+
+    val dmaMemBus = if(p.withL2Cache) mainBus else memBus
+
+    val dma = p.withDma generate new TilelinkDmaFiber(
+      DmaParameter(
+        addressWidth = 32,
+        dataWidth = 32,
+        ctrlAddressWidth = 12,
+        ctrlDataWidth = 32,
+        lengthWidth = 32,
+        pendingSize = 2,
+        withInternalLoopback = true
+      )
+    ) {
+      dmaMemBus << mbus
+      mbus.setDownConnection(a = StreamPipe.FULL)
+    }
     
     var mBus : SlaveBus = null
     if(p.sparseMem){
@@ -125,6 +142,8 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
       val uart = new TilelinkUartFiber()
       uart.node at 0x10001000 of bus32
       plic.mapUpInterrupt(1, uart.interrupt)
+
+      if(p.withDma) dma.cbus at 0x10003000 of bus32
 
       val spiFlash = p.withSpiFlash generate new TilelinkSpiXdrMasterFiber(SpiXdrMasterCtrl.MemoryMappingParameters(
         SpiXdrMasterCtrl.Parameters(8, 12, SpiXdrParameter(2, 2, 1)).addFullDuplex(0,1,false),

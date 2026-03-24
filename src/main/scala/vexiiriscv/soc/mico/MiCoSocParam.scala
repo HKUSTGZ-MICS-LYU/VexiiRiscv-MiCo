@@ -26,6 +26,7 @@ class MiCoSocParam {
   var l2Ways = 8
   var l2Bytes = 4096
   var withHub = false
+  var withDma = false
 
   var sparseMem = false
   var sparseMemLat = 4
@@ -56,6 +57,7 @@ class MiCoSocParam {
     opt[Unit]("mico-vpu-pipe") action { (v, c) => MiCoVpuPipe = true }
     opt[Unit]("l2-cache") action { (v, c) => withL2Cache = true; vexii.lsuL1Coherency = true}
     opt[Unit]("with-hub") action { (v, c) => withHub = true; vexii.lsuL1Coherency = true}
+    opt[Unit]("with-dma") action { (v, c) => withDma = true }
     opt[Int]("l2-ways") action { (v, c) => l2Ways = v }
     opt[Int]("l2-bytes") action { (v, c) => l2Bytes = v }
     opt[Unit]("sparse-mem") action { (v, c) => sparseMem = true }
@@ -75,6 +77,10 @@ class MiCoSocParam {
       // In coherent mode, Tilelink C-source IDs are shared with writeback/probe paths.
       // Keep enough source bits by ensuring refill IDs cover writeback IDs.
       vexii.lsuL1RefillCount = vexii.lsuL1RefillCount max vexii.lsuL1WritebackCount
+    }
+    if(withDma){
+      // DMA uses the memory bus and can operate with or without LSU L1 enabled.
+      vexii.lsuMemDataWidthMin = vexii.lsuMemDataWidthMin max 32
     }
     if(sparseMem){
       // Sparse memory bus is wired as 64-bit in MiCoSoc; keep LSU memory width aligned.
