@@ -504,7 +504,7 @@ class VexiiRiscvProbe(cpu : VexiiRiscv, kb : Option[konata.Backend], var withRvl
         pendingIo += trace
       }
 
-      if (bus.rsp.valid.toBoolean) {
+      if (bus.rsp.valid.toBoolean && pendingIo.nonEmpty) {
         val trace = pendingIo.dequeue()
         if(trace.fromHart && trace.io){
           if(!trace.write){
