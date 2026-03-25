@@ -29,20 +29,28 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
     val system = new ClockingArea(socCtrl.system.cd) {
     // Let's define our main tilelink bus on which the CPU, RAM and peripheral "portal" will be plugged later.
     val mainBus = tilelink.fabric.Node()
-    val ioBus = tilelink.fabric.Node()
+    val ioBus = tilelink.fabric.Node() 
 
     val cpu = new TilelinkVexiiRiscvFiber(p.vexii.plugins())
     if(p.socCtrl.withDebug) socCtrl.debugModule.bindHart(cpu)
-    if(p.vexii.lsuL1Enable){
-      // Split cached memory and IO paths only when the LSU L1 is enabled.
-      mainBus << List(cpu.iBus, cpu.lsuL1Bus)
-      ioBus << List(cpu.dBus)
-    } else {
-      // Cacheless mode has a single data path; route peripherals from main bus.
-      mainBus << List(cpu.iBus, cpu.dBus)
-      ioBus << mainBus
+    mainBus << List(cpu.iBus, p.vexii.lsuL1Enable.mux(cpu.lsuL1Bus, cpu.dBus))
+    ioBus << List(cpu.dBus)
+    if (p.vexii.fetchL1Enable) cpu.iBus.setDownConnection { (down, up) =>
+      down.a << up.a.halfPipe().halfPipe()
+      up.d << down.d.m2sPipe()
     }
-    cpu.dBus.setDownConnection(a = StreamPipe.S2M) // Let's add a bit of pipelining on the cpu.dBus to increase FMax
+    if (p.vexii.lsuL1Enable) {
+      cpu.lsuL1Bus.setDownConnection(
+        a = p.vexii.lsuL1Coherency.mux(StreamPipe.HALF, StreamPipe.FULL),
+        b = StreamPipe.HALF_KEEP,
+        c = StreamPipe.FULL,
+        d = StreamPipe.M2S_KEEP,
+        e = StreamPipe.HALF
+      )
+      cpu.dBus.setDownConnection(a = StreamPipe.HALF, d = StreamPipe.M2S_KEEP)
+    } else {
+      cpu.dBus.setDownConnection(a = StreamPipe.S2M)
+    }
 
     val vpuParam = VpuCfuParameter(
       vlen = p.MiCoVpuLen, 
