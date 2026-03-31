@@ -589,7 +589,7 @@ class ParamSimple() {
   def withIndirectCsr = checkISA("smcsrind") || checkISA("sscsrind")
   def withPerformanceCounters = checkISA("zihpm") || checkISA("zicntr")
   def withPerformanceScountovf = checkISA("sscofpmf")
-  def withInterrutpFilter = checkISA("ssaia")
+  def withSsaia = checkISA("ssaia")
 
   def fixIsaParams() = {
     if(checkISA("h")) addISA("s")
@@ -614,7 +614,7 @@ class ParamSimple() {
     if(withUser) privParam.withUser = true
     if(withSstc) privParam.withSSTC = true
     if(withRdTime) privParam.withRdTime = true
-    if(withInterrutpFilter) privParam.withInterrutpFilter = true
+    if(withSsaia) privParam.withSsaia = true
     if(withRvc) withAlignerBuffer = true
   }
 
@@ -713,6 +713,7 @@ class ParamSimple() {
     opt[Unit]("with-rvZknAes") action { (v, c) => addISA("zkne", "zknd") }
     opt[Unit]("with-sxaia") action { (v, c) => addISA("smaia", "ssaia") }
     opt[Int]("imsic-interrupt-number") action { (v, c) => privParam.imsicInterrupts = v }
+    opt[Int]("guest-external-interrupt-file-number") action { (v, c) => privParam.guestExternalInterruptFiles = v }
     opt[Unit]("with-whiteboxer-outputs") action { (v, c) => withWhiteboxerOutputs = true }
     opt[Unit]("with-hart-id-input") action { (v, c) => withHartIdInput = true }
     opt[Unit]("with-hart-id-input-defaulted") action { (v, c) => privParam.withHartIdInputDefaulted = true }
