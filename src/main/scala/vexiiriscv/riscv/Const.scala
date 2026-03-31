@@ -318,6 +318,7 @@ object InterruptInfo {
     10, 2, 6,   // VS interrupts: external, software, timer
     13          // Local interrupt: counter overflow
   )
+  def defaultOrderWidth = log2Up(defaultOrder.size + 1)
 }
 
 object IndirectCSR{

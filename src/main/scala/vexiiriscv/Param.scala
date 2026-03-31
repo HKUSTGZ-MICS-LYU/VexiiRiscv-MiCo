@@ -806,6 +806,7 @@ class ParamSimple() {
     opt[Int]("asid-width") action{ (v,c) => asidWidth = v }
     opt[Int]("gshare-bytes") action{ (v,c) => gshareBytes = v }
     opt[Unit]("record-htinst") action{ (v, c) => recordHtinst = true }
+    opt[Int]("injected-guest-interrupt-width") action { (v, c) => privParam.injectedInterruptWidth = v }
     opt[Unit]("dual-issue") action { (v, c) =>
       decoders = 2
       lanes = 2

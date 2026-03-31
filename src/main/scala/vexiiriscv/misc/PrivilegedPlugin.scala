@@ -40,6 +40,7 @@ object PrivilegedParam{
     impId          = 0,
     imsicInterrupts = 0,
     guestExternalInterruptFiles = 0,
+    injectedInterruptWidth = 6,
     debugTriggers  = 0,
     debugTriggersLsu = false,
     withHartIdInputDefaulted = false
@@ -74,10 +75,12 @@ case class PrivilegedParam(var withSupervisor : Boolean,
                            var archId: Int,
                            var impId: Int,
                            var imsicInterrupts: Int,
+                           var injectedInterruptWidth: Int,
                            var guestExternalInterruptFiles: Int,
                            var withHartIdInputDefaulted : Boolean){
   def withImsic = imsicInterrupts > 0
   def withGuestImsic = withImsic && guestExternalInterruptFiles > 0
+  def externalInterruptPriorityWidth = log2Up(imsicInterrupts)
 
   def check(): Unit = {
     assert(!(withSupervisor && !withUser))
@@ -90,6 +93,7 @@ case class PrivilegedParam(var withSupervisor : Boolean,
       if (withSsaia) {
         assert(withGuestImsic)
         assert(guestExternalInterruptFiles < 64 && guestExternalInterruptFiles > 0)
+        assert(injectedInterruptWidth >= 6 && injectedInterruptWidth <= 12)
       }
     }
   }
@@ -97,7 +101,7 @@ case class PrivilegedParam(var withSupervisor : Boolean,
 
 case class Delegator(var enable: Bool, privilege: Int)
 case class InterruptSpec(var cond: Bool, id: Int, privilege: Int, priority: Int, delegators: List[Delegator])
-case class InjectInterruptSpec(var cond: Bool, id: UInt, privilege: Int, priority: UInt)
+case class InjectInterruptSpec(var cond: Bool, id: UInt, privilege: Int, priority: extendedInterruptPriority)
 case class ExceptionSpec(id: Int, delegators: List[Delegator])
 
 /**
@@ -178,10 +182,13 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
     if (p.withSupervisor) addMisa('S')
     if (p.withHypervisor) addMisa('H')
 
-    val causesWidthMins = host.list[CauseUser].map(_.getCauseWidthMin())
-    CODE_WIDTH.set((5 +: causesWidthMins).max)
+    val codeWidths = ArrayBuffer[Int](5)
+    codeWidths ++= host.list[CauseUser].map(_.getCauseWidthMin())
+    if (p.withSsaia && p.withHypervisor) codeWidths += p.injectedInterruptWidth
+    CODE_WIDTH.set(codeWidths.max)
     val trapIprioWidths = ArrayBuffer[Int](log2Up(InterruptInfo.defaultOrder.size + 1))
-    if (p.withImsic) trapIprioWidths += log2Up(p.imsicInterrupts)
+    if (p.withImsic) trapIprioWidths += p.externalInterruptPriorityWidth
+    if (p.withSsaia && p.withHypervisor) trapIprioWidths += 9
     TRAP_IPRIO_WIDTH.set(trapIprioWidths.max)
 
     assert(HART_COUNT.get == 1)
@@ -219,7 +226,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
           require(iprio != -1, "New registered interrupt must be added to InterruptPrio.defaultOrder")
           addInterrupt(cond, id, privilege, iprio + 1, delegators)
         }
-        def addInjectInterrupt(cond: Bool, id: UInt, privilege: Int, priority: UInt): Unit = injectedInterrupt += InjectInterruptSpec(cond, id, privilege, priority)
+        def addInjectInterrupt(cond: Bool, id: UInt, privilege: Int, priority: extendedInterruptPriority): Unit = injectedInterrupt += InjectInterruptSpec(cond, id, privilege, priority)
       }
 
       val api = cap.hart(hartId)
@@ -771,6 +778,17 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
           }
         }
 
+        val victl = p.withSsaia generate new api.Csr(CSR.HVICTL) {
+          val vti = RegInit(False)
+          val ipriom = RegInit(False)
+          val dpr = RegInit(False)
+          val iid = RegInit(U(0, p.injectedInterruptWidth bits))
+          val iprio = RegInit(U(0, 8 bits))
+
+          readWrite(0 -> iprio, 8 -> ipriom, 9 -> dpr, 16 -> iid, 30 -> vti)
+        }
+        val injectCheck = p.withSsaia.mux(!victl.vti, True)
+
         val sstc = new Area {
           val logic = p.withSSTC generate new Area {
             val cmp = RegInit(U(64 bits, default -> true))
@@ -778,7 +796,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
 
             val hostCheck = (m.counteren.tm && m.envcfg.stce) || withMachinePrivilege
             val hcheck = counteren.tm && envcfg.stce
-            val accessable = withSupervisorPrivilege || (withVirtualSupervisorPrivilege && hcheck)
+            val accessable = withSupervisorPrivilege || (withVirtualSupervisorPrivilege && hcheck && injectCheck)
 
             if (XLEN.get == 32) {
               api.readWrite(cmp(31 downto 0), CSR.VSTIMECMP)
@@ -1102,7 +1120,9 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         mapVSie(CSR.VSIP, 1, h.ip.vssip, h.ideleg.vss)
         api.remapWhen(CSR.SIP, CSR.VSIP, withGuestPrivilege)
 
-        spec.addInterrupt(h.ie.vseie && h.ip.vseipOr && h.ideleg.vse, id = 9, privilege = PrivilegeMode.VS, delegators = List(Delegator(True, PrivilegeMode.M), Delegator(True, PrivilegeMode.S)))
+        if (p.withSsaia) api.allowCsr(CsrListFilter(List(CSR.VSIP, CSR.VSIE)), withSupervisorPrivilege || (withGuestPrivilege && h.injectCheck))
+
+        if (!p.withSsaia) spec.addInterrupt(h.ie.vseie && h.ip.vseipOr && h.ideleg.vse, id = 9, privilege = PrivilegeMode.VS, delegators = List(Delegator(True, PrivilegeMode.M), Delegator(True, PrivilegeMode.S)))
         spec.addInterrupt(h.ie.vstie && h.ip.vstipOr && h.ideleg.vst, id = 5, privilege = PrivilegeMode.VS, delegators = List(Delegator(True, PrivilegeMode.M), Delegator(True, PrivilegeMode.S)))
         spec.addInterrupt(h.ie.vssie && h.ip.vssip && h.ideleg.vss, id = 1, privilege = PrivilegeMode.VS, delegators = List(Delegator(True, PrivilegeMode.M), Delegator(True, PrivilegeMode.S)))
 
@@ -1112,10 +1132,62 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
           val priority = Global.TRAP_IPRIO().assignDontCare()
         }
 
+        val injectInterrupt = p.withSsaia generate new Area {
+          val vseiPriority = extendedInterruptPriority()
+          vseiPriority.high := False
+          vseiPriority.external := False
+          vseiPriority.default := InterruptInfo.defaultOrder.indexOf(9)
+          when (h.imsic.valid && h.imsic.identity =/= 0) {
+            vseiPriority.local := h.imsic.current.identity.resized
+          } elsewhen (h.imsic.mux === 0 && h.victl.iid === 9 && h.victl.iprio =/= 0) {
+            vseiPriority.local := h.victl.iprio.resized
+          } otherwise {
+            vseiPriority.local := 256
+          }
+
+          spec.addInjectInterrupt(
+            h.ie.vseie && h.ip.vseipOr && h.ideleg.vse,
+            id = 9,
+            privilege = PrivilegeMode.VS,
+            priority = vseiPriority,
+          )
+
+          val candidatePriority = extendedInterruptPriority()
+          val candidateHighPriority = candidate.priority < InterruptInfo.defaultOrder.indexOf(9)
+          candidatePriority.default := candidate.priority.resized
+          candidatePriority.local := 0
+          candidatePriority.local(8) := !candidateHighPriority
+          candidatePriority.external := False
+          candidatePriority.high := candidateHighPriority
+
+          spec.addInjectInterrupt(
+            !h.victl.vti && candidate.interrupt.orR,
+            id = candidate.interrupt.asUInt,
+            privilege = PrivilegeMode.VS,
+            priority = candidatePriority,
+          )
+
+          val viPriority = extendedInterruptPriority()
+          val viHighPriority = !h.victl.iprio.orR && h.victl.dpr
+          viPriority.local(0, 8 bits) := h.victl.iprio.resized
+          viPriority.local(8) := !(h.victl.iprio.orR || h.victl.dpr)
+          viPriority.default := Mux(viHighPriority, U(0), U(InterruptInfo.defaultOrder.size -1))
+          viPriority.external := h.victl.iprio.orR
+          viPriority.high := viHighPriority
+          spec.addInjectInterrupt(
+            h.victl.vti && h.victl.iid =/= 9,
+            id = h.victl.iid,
+            privilege = PrivilegeMode.VS,
+            priority = viPriority,
+          )
+        }
+
         val topi = new Area {
           val interrupt = Global.CODE().assignDontCare()
-          val priority = Mux(interrupt === B(0), B(0), B(1))
-          api.read(CSR.VSTOPI, 0 -> priority, 16 -> interrupt)
+          val priority = UInt(8 bits)
+          val rectifiedPriority = Mux(interrupt.orR, p.withSsaia.mux(Mux(h.victl.ipriom, priority, U(1)), priority), U(0))
+
+          api.read(CSR.VSTOPI, 0 -> rectifiedPriority, 16 -> interrupt)
           api.remapWhen(CSR.STOPI, CSR.VSTOPI, withGuestPrivilege)
         }
 
