@@ -73,7 +73,7 @@ object MiCoSocSim extends App{
     if (withRvlsCheck) probe.add(new RvlsBackend(new File(currentTestPath)).spinalSimFlusher(hzToLong(1000 Hz)))
 
     probe.autoRegions()
-    probe.checkLiveness = false
+    probe.checkLiveness = true
 
     if(p.socCtrl.withJtagTap) {
       probe.checkLiveness = false
