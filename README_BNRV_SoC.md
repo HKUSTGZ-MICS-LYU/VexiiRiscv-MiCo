@@ -30,3 +30,38 @@ make -C sw recompile MAIN=llama2_benchmark LLAMA2_BIN=llama2/llama_3M_W1A8_bench
 ## Simulate Workloads on SoC
 
 Refer to `sim_soc.sh`
+
+To validate `sw/MiCo-Lib/targets/vexii_bitnet/bitnet_matmul.c` against reference kernels across BNRV variants, use:
+
+```shell
+make -C sw recompile MAIN=tests/bnmatmul_variants_test TARGET=vexii_soc MARCH=rv32imafc OPT="bnrv ref" SPRAM=1 BITNET_QUANT=2 USE_SIMD=8
+./sim_soc_bnrv.sh sw/tests/bnmatmul_variants_test.elf 1b 32
+
+make -C sw recompile MAIN=tests/bnmatmul_variants_test TARGET=vexii_soc MARCH=rv32imafc OPT="bnrv ref" SPRAM=1 BITNET_QUANT=2 USE_SIMD=16
+./sim_soc_bnrv.sh sw/tests/bnmatmul_variants_test.elf 1b 32
+
+make -C sw recompile MAIN=tests/bnmatmul_variants_test TARGET=vexii_soc MARCH=rv32imafc OPT="bnrv ref" SPRAM=1 BITNET_QUANT=2 USE_SIMD=32
+./sim_soc_bnrv.sh sw/tests/bnmatmul_variants_test.elf 1b 32
+
+make -C sw recompile MAIN=tests/bnmatmul_variants_test TARGET=vexii_soc MARCH=rv32imafc OPT="bnrv ref" SPRAM=1 BITNET_QUANT=3 USE_SIMD=32
+./sim_soc_bnrv.sh sw/tests/bnmatmul_variants_test.elf 1.5b 32
+
+make -C sw recompile MAIN=tests/bnmatmul_variants_test TARGET=vexii_soc MARCH=rv32imafc OPT="bnrv ref" SPRAM=1 BITNET_QUANT=4 USE_SIMD=32
+./sim_soc_bnrv.sh sw/tests/bnmatmul_variants_test.elf 2b 32
+
+make -C sw recompile MAIN=tests/bnmatmul_variants_test TARGET=vexii_soc MARCH=rv32imafc OPT="bnrv ref" SPRAM=1 BITNET_QUANT=2 USE_SIMD=4
+./sim_soc_bnrv.sh sw/tests/bnmatmul_variants_test.elf 1b 4
+
+make -C sw recompile MAIN=tests/bnmatmul_variants_test TARGET=vexii_soc MARCH=rv32imafc OPT="bnrv ref" SPRAM=1 BITNET_QUANT=3 USE_SIMD=4
+./sim_soc_bnrv.sh sw/tests/bnmatmul_variants_test.elf 1.5b 4
+
+make -C sw recompile MAIN=tests/bnmatmul_variants_test TARGET=vexii_soc MARCH=rv32imafc OPT="bnrv ref" SPRAM=1 BITNET_QUANT=4 USE_SIMD=4
+./sim_soc_bnrv.sh sw/tests/bnmatmul_variants_test.elf 2b 4
+```
+
+`sim_soc_bnrv.sh` now accepts optional arguments:
+- arg1: ELF path (required)
+- arg2: BitNet qtype (`1b`, `1.5b`, `2b`; default `1b`)
+- arg3: BitNet version (`4`, `8`, `16`, `32`; default `32`)
+
+For `USE_SIMD=4`, simulate with arg3=`4`.
