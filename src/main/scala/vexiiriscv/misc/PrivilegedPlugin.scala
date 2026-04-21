@@ -86,6 +86,7 @@ case class PrivilegedParam(var withSupervisor : Boolean,
 
 case class Delegator(var enable: Bool, privilege: Int)
 case class InterruptSpec(var cond: Bool, id: Int, privilege: Int, priority: Int, delegators: List[Delegator])
+case class InjectInterruptSpec(var cond: Bool, id: UInt, privilege: Int, priority: UInt)
 case class ExceptionSpec(id: Int, delegators: List[Delegator])
 
 /**
@@ -196,14 +197,17 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
       }
       val spec = new Area {
         val interrupt = ArrayBuffer[InterruptSpec]()
+        val injectedInterrupt = ArrayBuffer[InjectInterruptSpec]()
         val exception = ArrayBuffer[ExceptionSpec]()
+
+        def addInterrupt(cond: Bool, id: Int, privilege: Int, priority: Int, delegators: List[Delegator]): Unit = interrupt += InterruptSpec(cond, id, privilege, priority, delegators)
 
         def addInterrupt(cond: Bool, id: Int, privilege: Int, delegators: List[Delegator]): Unit = {
           val iprio = InterruptInfo.defaultOrder.indexOf(id)
           require(iprio != -1, "New registered interrupt must be added to InterruptPrio.defaultOrder")
-
-          interrupt += InterruptSpec(cond, id, privilege, iprio + 1, delegators)
+          addInterrupt(cond, id, privilege, iprio + 1, delegators)
         }
+        def addInjectInterrupt(cond: Bool, id: UInt, privilege: Int, priority: UInt): Unit = injectedInterrupt += InjectInterruptSpec(cond, id, privilege, priority)
       }
 
       val api = cap.hart(hartId)
