@@ -168,6 +168,9 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
 
     val causesWidthMins = host.list[CauseUser].map(_.getCauseWidthMin())
     CODE_WIDTH.set((5 +: causesWidthMins).max)
+    val trapIprioWidths = ArrayBuffer[Int](log2Up(InterruptInfo.defaultOrder.size + 1))
+    if (p.withImsic) trapIprioWidths += log2Up(p.imsicInterrupts)
+    TRAP_IPRIO_WIDTH.set(trapIprioWidths.max)
 
     assert(HART_COUNT.get == 1)
     api.get
@@ -671,6 +674,12 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         spec.addInterrupt(ip.msip && ie.msie, id = 3, privilege = PrivilegeMode.M, delegators = Nil)
         spec.addInterrupt(ip.meip && ie.meie, id = 11, privilege = PrivilegeMode.M, delegators = Nil)
 
+        /* interrupt information before interrupt injection */
+        val candidate = new Area {
+          val interrupt = Global.CODE().assignDontCare()
+          val priority = Global.TRAP_IPRIO().assignDontCare()
+        }
+
         val topi = new Area {
           val interrupt = Global.CODE().assignDontCare()
           val priority = Mux(interrupt === B(0), B(0), B(1))
@@ -976,6 +985,12 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
           spec.addInterrupt(!m.ideleg.ss && vip.ssip && vie.ssie && ieShadow.ssie, id = 1, privilege = PrivilegeMode.S, delegators = List(Delegator(True, PrivilegeMode.M)))
         }
 
+        /* interrupt information before interrupt injection */
+        val candidate = new Area {
+          val interrupt = Global.CODE().assignDontCare()
+          val priority = Global.TRAP_IPRIO().assignDontCare()
+        }
+
         val topi = new Area {
           val interrupt = Global.CODE().assignDontCare()
           val priority = Mux(interrupt === B(0), B(0), B(1))
@@ -1043,6 +1058,12 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         spec.addInterrupt(h.ie.vseie && h.ip.vseip && h.ideleg.vse, id = 9, privilege = PrivilegeMode.VS, delegators = List(Delegator(True, PrivilegeMode.M), Delegator(True, PrivilegeMode.S)))
         spec.addInterrupt(h.ie.vstie && h.ip.vstipOr && h.ideleg.vst, id = 5, privilege = PrivilegeMode.VS, delegators = List(Delegator(True, PrivilegeMode.M), Delegator(True, PrivilegeMode.S)))
         spec.addInterrupt(h.ie.vssie && h.ip.vssip && h.ideleg.vss, id = 1, privilege = PrivilegeMode.VS, delegators = List(Delegator(True, PrivilegeMode.M), Delegator(True, PrivilegeMode.S)))
+
+        /* interrupt information before interrupt injection */
+        val candidate = new Area {
+          val interrupt = Global.CODE().assignDontCare()
+          val priority = Global.TRAP_IPRIO().assignDontCare()
+        }
 
         val topi = new Area {
           val interrupt = Global.CODE().assignDontCare()

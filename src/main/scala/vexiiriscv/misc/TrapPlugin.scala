@@ -241,6 +241,23 @@ class TrapPlugin(val trapAt : Int, val recordHtinst : Boolean) extends FiberPlug
             val takeA = !b.valid || (a.valid && (priorityCheck))
             takeA ? a | b
           }))
+
+          val triggerId = B(triggered.id).andMask(triggered.valid).resized
+          val triggerPriority = triggered.priority.andMask(triggered.valid).resized
+          p match {
+            case PrivilegeMode.M  => {
+              csr.m.candidate.interrupt := triggerId
+              csr.m.candidate.priority  := triggerPriority
+            }
+            case PrivilegeMode.S  => {
+              csr.s.candidate.interrupt := triggerId
+              csr.s.candidate.priority  := triggerPriority
+            }
+            case PrivilegeMode.VS => {
+              csr.vs.candidate.interrupt := triggerId
+              csr.vs.candidate.priority  := triggerPriority
+            }
+          }
         })
 
         val privilegeIndexedTriggers = privilegs.zip(privilegeTriggers)
