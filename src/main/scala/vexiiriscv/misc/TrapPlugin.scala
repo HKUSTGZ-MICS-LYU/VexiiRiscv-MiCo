@@ -237,7 +237,7 @@ class TrapPlugin(val trapAt : Int, val recordHtinst : Boolean) extends FiberPlug
           })
 
           val result = RegNext(interrupts.reduceBalancedTree((a, b) => {
-            val priorityCheck = (a.privilege > b.privilege) || ((a.privilege === b.privilege) && (a.priority < b.priority))
+            val priorityCheck = (a.priority < b.priority)
             val takeA = !b.valid || (a.valid && (priorityCheck))
             takeA ? a | b
           }))
