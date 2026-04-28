@@ -57,42 +57,50 @@ class TranslatedDBusAccessPlugin() extends FiberPlugin with TranslatedDBusAccess
 
     val fsm = for (tda <- dbusAccesses) yield new StateMachine {
       val generateTransPort = withAtsRedo && tda.requestGuest
-      val CMD, RSP = new State
+      val IDLE, CMD, RSP = new State
       val ATS = new State
       val tcmd = tda.cmd
       val trsp = tda.rsp
-      val size = generateTransPort generate Reg(cloneOf(tcmd.size))
 
-      setEntry(CMD)
+      val address = Reg(cloneOf(tcmd.address))
+      val size = Reg(cloneOf(tcmd.size))
+
+      val cacheRefill = Reg(Bits(access.accessRefillCount bits)) init(0)
+      val cacheRefillAny = Reg(Bool()) init(False)
+
+      val cacheRefillSet = cacheRefill.getZero
+      val cacheRefillAnySet = False
+      cacheRefill    := (cacheRefill | cacheRefillSet) & ~access.accessWake
+      cacheRefillAny := (cacheRefillAny | cacheRefillAnySet) & !access.accessWake.orR
+
+      setEntry(IDLE)
 
       tcmd.ready := False
 
-      CMD whenIsActive {
-        when(tcmd.valid) {
+      IDLE whenIsActive {
+        when (tcmd.valid) {
+          address := tcmd.address
+          size    := tcmd.size
+
           val guestCtx = WhenBuilder()
           if(generateTransPort) guestCtx.when(tcmd.guest) {
             atsPort.cmd.valid   := True
             atsPort.cmd.address := tcmd.address.resized
             when(atsPort.cmd.ready) {
               tcmd.ready  := True
-              size        := tcmd.size
               goto(ATS)
             }
           }
           guestCtx.otherwise {
-            cmd.valid     := True
-            cmd.address   := tcmd.address
-            cmd.size      := tcmd.size
-            when (cmd.ready) {
-              tcmd.ready  := True
-              goto(RSP)
-            }
+            tcmd.ready  := True
+            goto(CMD)
           }
         }
       }
 
       if(generateTransPort) ATS whenIsActive {
         when(atsPort.rsp.valid) {
+          atsPort.rsp.ready := True
           /* check permission */
           when (!atsPort.rsp.bypass && atsPort.rsp.pageFault || atsPort.rsp.accessFault) {
             trsp.valid          := True
@@ -102,31 +110,40 @@ class TranslatedDBusAccessPlugin() extends FiberPlugin with TranslatedDBusAccess
             trsp.redo           := False
             trsp.waitSlot       := B(0)
             trsp.waitAny        := False
-
-            atsPort.rsp.ready   := True
-            goto(CMD)
+            goto(IDLE)
           } otherwise {
-            cmd.valid     := True
-            cmd.address   := atsPort.rsp.address
-            cmd.size      := size
-            when (cmd.ready) {
-              atsPort.rsp.ready := True
-              goto(RSP)
-            }
+            address             := atsPort.rsp.address
+            goto(CMD)
+          }
+        }
+      }
+
+      CMD whenIsActive {
+        when(cacheRefill === 0 && !cacheRefillAny) {
+          cmd.valid     := True
+          cmd.address   := address
+          cmd.size      := size
+          when (cmd.ready) {
+            goto(RSP)
           }
         }
       }
 
       RSP whenIsActive {
-        trsp.valid        := rsp.valid
-        trsp.data         := rsp.data
-        trsp.error(0)     := rsp.error
-        trsp.redo         := rsp.redo
-        trsp.waitSlot     := rsp.waitSlot
-        trsp.waitAny      := rsp.waitAny
-
         when (rsp.valid) {
-          goto(CMD)
+          when (rsp.redo) {
+            cacheRefillSet    := rsp.waitSlot
+            cacheRefillAnySet := rsp.waitAny
+            goto(CMD)
+          } otherwise {
+            trsp.valid        := rsp.valid
+            trsp.data         := rsp.data
+            trsp.error(0)     := rsp.error
+            trsp.redo         := rsp.redo
+            trsp.waitSlot     := rsp.waitSlot
+            trsp.waitAny      := rsp.waitAny
+            goto(IDLE)
+          }
         }
       }
     }
