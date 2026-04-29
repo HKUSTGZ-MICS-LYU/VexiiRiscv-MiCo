@@ -856,7 +856,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
 
         val sources = for (interrupt <- file.interrupts) yield new Area {
           val id = interrupt.id
-          val offset = id / XLEN * (1 + (XLEN == 64).toInt)
+          val offset = id / XLEN * (1 + (XLEN.get == 64).toInt)
 
           api.readWrite(interrupt.ie, provider(IndirectCSR.eie0 + offset, ireg), id % XLEN)
           api.readWrite(interrupt.ip, provider(IndirectCSR.eip0 + offset, ireg), id % XLEN)
