@@ -16,6 +16,7 @@ def rootGen() = {
     scalacOptions += s"-Xplugin:${new File((if(spinalHdlPathEnabled) spinalHdlPath else baseDirectory.value.getAbsolutePath + s"/ext/SpinalHDL") + s"/idslplugin/target/scala-${scalaVersion.value.split("\\.").dropRight(1).mkString(".")}/spinalhdl-idsl-plugin_${scalaVersion.value.split("\\.").dropRight(1).mkString(".")}-$spinalVersion.jar")}",
     scalacOptions += s"-Xplugin-require:idsl-plugin",
     scalacOptions += "-language:reflectiveCalls",
+    javaOptions += "-Xss16M",
     libraryDependencies ++= Seq(
       "org.scalatest" %% "scalatest" % "3.2.17",
       "org.yaml" % "snakeyaml" % "1.8",

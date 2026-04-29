@@ -25,6 +25,8 @@ trait VexiiRiscvCross extends SbtModule with CrossSbtModule {
 
   override def moduleDir = super.moduleDir / os.up
 
+  override def forkArgs = Seq("-Xss16M")
+
   def rvlsJniSource = Task.Sources("ext/rvls/bindings/jni")
   def rvlsSpinalSource = Task.Sources("ext/rvls/bindings/spinal")
   override def sources = Task { super.sources() ++ rvlsJniSource() ++ rvlsSpinalSource() }
