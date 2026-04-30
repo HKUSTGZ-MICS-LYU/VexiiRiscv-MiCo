@@ -313,7 +313,7 @@ class MmuPlugin(var spec : MmuSpec,
     // Implement the hardware for all the TLB storages
     val tlbGenerateParam = MmuTlbStorageEntryParam(
       checkUser   = true,
-      checkGuest  = true
+      checkGuest  = priv.implementHypervisor
     )
     val storages = for(ss <- storageSpecs) yield new MmuTlbStorage(spec, physicalWidth, tlbGenerateParam, ss)
 
@@ -348,8 +348,9 @@ class MmuPlugin(var spec : MmuSpec,
         for ((way, wayId) <- sl.ways.zipWithIndex) {
           readStage(sl.keys.ENTRIES)(wayId) := way.readAsync(readAddress)
           hitsStage(sl.keys.HITS_PRE_VALID)(wayId) := hitsStage(sl.keys.ENTRIES)(wayId).hit(hitsStage(ps.req.PRE_ADDRESS))
-          ctrlStage(sl.keys.HITS)(wayId) := ctrlStage(sl.keys.HITS_PRE_VALID)(wayId) && ctrlStage(sl.keys.ENTRIES)(wayId).valid &&
-              (ctrlStage(sl.keys.ENTRIES)(wayId).guest === forceGuest)
+          ctrlStage(sl.keys.HITS)(wayId) := ctrlStage(sl.keys.HITS_PRE_VALID)(wayId) &&
+            ctrlStage(sl.keys.ENTRIES)(wayId).valid &&
+            priv.implementHypervisor.mux(ctrlStage(sl.keys.ENTRIES)(wayId).guest === forceGuest, True)
         }
       }
 
@@ -626,7 +627,7 @@ class MmuPlugin(var spec : MmuSpec,
             storageLevel.write.data.allowWrite      := load.flags.W && load.flags.D
             storageLevel.write.data.allowExecute    := load.flags.X
             storageLevel.write.data.allowUser       := load.flags.U
-            storageLevel.write.data.guest           := isTwoStage
+            if (priv.implementHypervisor) storageLevel.write.data.guest := isTwoStage
 
             storageLevel.allocId.increment()
           }
