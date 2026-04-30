@@ -378,7 +378,6 @@ class MmuPlugin(var spec : MmuSpec,
         val lineAllowWrite   = entriesMux(_.allowWrite)
         val lineAllowUser    = entriesMux(_.allowUser)
         val lineTranslated   = entriesMux(_.physicalAddressFrom(ps.req.PRE_ADDRESS))
-        val lineIsGuest      = entriesMux(_.guest)
 
         val requireMmuLockup  = CombInit(ps.usage match {
           case LOAD_STORE => ps.req.FORCE_GUEST.mux(vsatpValid, api.lsuTranslationEnable)
