@@ -393,14 +393,17 @@ class MmuPlugin(var spec : MmuSpec,
           val allow_read    = lineAllowRead || allow_mxr && lineAllowExecute
           val allow_write   = lineAllowWrite
 
+          val privCheck     = (lineAllowUser && nominalSupervisor && !allow_sum) ||
+                              (!lineAllowUser && nominalUser)
+          val readCheck     = ps.req.LOAD && !allow_read
+          val writeCheck    = ps.req.STORE && !allow_write
+          val executeCheck  = ps.req.EXECUTE && !allow_execute
+          val page_fault    = privCheck || readCheck || writeCheck || executeCheck
+
           HAZARD        := False
           REFILL        := !hit
           TRANSLATED    := lineTranslated
-          PAGE_FAULT    := (lineAllowUser && nominalSupervisor && !allow_sum) ||
-                            (!lineAllowUser && nominalUser) ||
-                            Mux(ps.req.LOAD, !allow_read, False) ||
-                            Mux(ps.req.STORE, !allow_write, False) ||
-                            Mux(ps.req.EXECUTE, !allow_execute, False)
+          PAGE_FAULT    := page_fault
           ACCESS_FAULT  := False
         } otherwise {
           HAZARD        := False
@@ -569,6 +572,14 @@ class MmuPlugin(var spec : MmuSpec,
           }
         }
 
+        def rspCheck(): Unit = {
+          when(!storageEnable || translationFault) {
+            goto(DONE(levelId))
+          } otherwise {
+            goto(REFILL(levelId))
+          }
+        }
+
         CMD(levelId) whenIsActive{
           load.cmd.valid := True
           when(load.cmd.ready) {
@@ -580,22 +591,12 @@ class MmuPlugin(var spec : MmuSpec,
           if(levelId == 0) load.exception setWhen(!load.leaf)
           when(load.rsp.valid){
             levelId match {
-              case 0 => {
-                when(!storageEnable || translationFault) {
-                  goto(DONE(levelId))
-                } otherwise {
-                  goto(REFILL(levelId))
-                }
-              }
+              case 0 => rspCheck
               case _ => {
                 when(load.exception) {
                   goto(DONE(levelId))
                 } elsewhen(load.leaf) {
-                  when(!storageEnable || translationFault) {
-                    goto(DONE(levelId))
-                  } otherwise {
-                    goto(REFILL(levelId))
-                  }
+                  rspCheck
                 } otherwise {
                   val targetLevelId = levelId - 1
                   val targetLevel = spec.levels(targetLevelId)

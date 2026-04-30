@@ -149,12 +149,15 @@ class ShadowMmuPlugin(var spec : MmuSpec,
           val allow_read    = lineAllowRead || mmu.logic.status.mxr && lineAllowExecute
           val allow_write   = lineAllowWrite
 
+          val readCheck     = ps.req.LOAD && !allow_read
+          val writeCheck    = ps.req.STORE && !allow_write
+          val executeCheck  = ps.req.EXECUTE && !allow_execute
+          val page_fault    = readCheck || writeCheck || executeCheck
+
           HAZARD        := False
           REFILL        := !hit
           TRANSLATED    := lineTranslated
-          PAGE_FAULT    := Mux(ps.req.LOAD, !allow_read, False) ||
-                           Mux(ps.req.STORE, !allow_write, False) ||
-                           Mux(ps.req.EXECUTE, !allow_execute, False)
+          PAGE_FAULT    := page_fault
           ACCESS_FAULT  := False
         } otherwise {
           HAZARD        := False
@@ -296,6 +299,18 @@ class ShadowMmuPlugin(var spec : MmuSpec,
         o.pte.ppn := U(load.readed.dropLow(10)).resized
       }
 
+      val permissionCheck = new Area {
+        val allowRead    = load.flags.R || (load.flags.X && mmu.logic.status.mxr && !isImplicitAccess)
+        val allowWrite   = load.flags.W && load.flags.D
+        val allowExecute = load.flags.X
+
+        val readCheck    = permission.read && !allowRead
+        val writeCheck   = permission.write && !allowWrite
+        val executeCheck = permission.execute && !allowExecute
+
+        val fault = readCheck || writeCheck || executeCheck
+      }
+
       val fetch = for((level, levelId) <- spec.levels.zipWithIndex) yield new Area{
         val pteFault = load.exception || load.levelException(levelId) || (levelId == 0).mux(!load.leaf, False)
         val pteReadError = load.rsp.error.orR
@@ -303,9 +318,15 @@ class ShadowMmuPlugin(var spec : MmuSpec,
         val pageFault = !pteReadError && pteFault
         val accessFault = pteReadError || !pteFault && leafAccessFault
         val translationFault = pteFault || leafAccessFault
-        val permissionFault = Mux(permission.read, !(load.flags.R || (load.flags.X && mmu.logic.status.mxr && !isImplicitAccess)), False) ||
-                              Mux(permission.write, !(load.flags.W && load.flags.D), False) ||
-                              Mux(permission.execute, !(load.flags.X), False)
+        val permissionFault = permissionCheck.fault
+
+        def rspCheck(): Unit = {
+          when(!storageEnable || translationFault) {
+            goto(DONE(levelId))
+          } otherwise {
+            goto(REFILL(levelId))
+          }
+        }
 
         CMD(levelId) whenIsActive{
           load.cmd.valid := True
@@ -318,22 +339,12 @@ class ShadowMmuPlugin(var spec : MmuSpec,
           if(levelId == 0) load.exception setWhen(!load.leaf)
           when(load.rsp.valid){
             levelId match {
-              case 0 => {
-                when(!storageEnable || translationFault) {
-                  goto(DONE(levelId))
-                } otherwise {
-                  goto(REFILL(levelId))
-                }
-              }
+              case 0 => rspCheck
               case _ => {
                 when(load.exception) {
                   goto(DONE(levelId))
                 } elsewhen(load.leaf) {
-                  when(!storageEnable || translationFault) {
-                    goto(DONE(levelId))
-                  } otherwise {
-                    goto(REFILL(levelId))
-                  }
+                  rspCheck
                 } otherwise {
                   val targetLevelId = levelId - 1
                   val targetLevel = spec.levels(targetLevelId)
