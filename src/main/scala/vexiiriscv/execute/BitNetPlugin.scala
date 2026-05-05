@@ -170,7 +170,7 @@ class BitNetBufferPlugin(val layer : LaneLayer,
       val buffer_high = buffer(addr_offset + 4*w_width, 4*w_width bits).asUInt
       val buffer_low = buffer(addr_offset, 4*w_width bits).asUInt
 
-      RESULT := (bitnetadd4(rs1, buffer_low, QType) + 
+      RESULT := (bitnetadd4(rs1, buffer_low, QType) +^
                 bitnetadd4(rs2, buffer_high, QType)).resized
 
       when (isValid && SEL && STORE){
