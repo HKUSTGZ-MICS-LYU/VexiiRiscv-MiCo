@@ -59,16 +59,29 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
       noWaitCompute = p.MiCoVpuStress,
       computePipe = p.MiCoVpuPipe)
 
-    val cfuConnect = p.vexii.withCfu generate (Fiber patch new Area {
-      val cpuCfuBus = cpu.logic.core.host[CfuPlugin].logic.bus
-      val cfuCfuBus = cfu.logic.cfuBus
-      cfuCfuBus << cpuCfuBus
-    })
+    val bitNetCfuParam = BitNetCfuParameter(
+      vlen = p.BitNetCfuLen,
+      maclen = p.BitNetCfuWidth,
+      xlen = p.BitNetCfuBusWidth,
+      qType = p.BitNetCfuQType,
+      noWaitCompute = p.BitNetCfuStress,
+      computePipe = p.BitNetCfuPipe)
 
     val cfu = p.useMiCoVpu generate new TilelinkVpuCfuFiber(vpuParam, p.vexii.xlen) {
       mainBus << bus
       bus.setDownConnection(a = StreamPipe.S2M)
     }
+
+    val bitNetCfu = p.useBitNetCfu generate new TilelinkBitNetCfuFiber(bitNetCfuParam, p.vexii.xlen) {
+      mainBus << bus
+      bus.setDownConnection(a = StreamPipe.S2M)
+    }
+
+    val cfuConnect = p.vexii.withCfu generate (Fiber patch new Area {
+      val cpuCfuBus = cpu.logic.core.host[CfuPlugin].logic.bus
+      if(p.useMiCoVpu) cfu.logic.cfuBus << cpuCfuBus
+      if(p.useBitNetCfu) bitNetCfu.logic.cfuBus << cpuCfuBus
+    })
 
     var memBus: Node = null
     val l2 = p.withL2Cache generate new Area {

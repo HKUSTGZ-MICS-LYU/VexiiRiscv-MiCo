@@ -22,6 +22,13 @@ class MiCoSocParam {
   var MiCoVpuBusWidth = 32
   var MiCoVpuStress = false
   var MiCoVpuPipe = false
+  var useBitNetCfu = false
+  var BitNetCfuLen = 256
+  var BitNetCfuWidth = 256
+  var BitNetCfuBusWidth = 32
+  var BitNetCfuQType = "1.5b"
+  var BitNetCfuStress = false
+  var BitNetCfuPipe = false
   var withL2Cache = false
   var l2Ways = 8
   var l2Bytes = 4096
@@ -55,6 +62,13 @@ class MiCoSocParam {
     opt[Int]("mico-vpu-bus-width") action { (v, c) => MiCoVpuBusWidth = v }
     opt[Unit]("mico-vpu-stress") action { (v, c) => MiCoVpuStress = true }
     opt[Unit]("mico-vpu-pipe") action { (v, c) => MiCoVpuPipe = true }
+    opt[Unit]("mico-bitnet-cfu") action { (v, c) => useBitNetCfu = true; vexii.withCfu = true }
+    opt[Int]("bitnet-cfu-len") action { (v, c) => BitNetCfuLen = v }
+    opt[Int]("bitnet-cfu-width") action { (v, c) => BitNetCfuWidth = v }
+    opt[Int]("bitnet-cfu-bus-width") action { (v, c) => BitNetCfuBusWidth = v }
+    opt[String]("bitnet-cfu-qtype") action { (v, c) => BitNetCfuQType = v }
+    opt[Unit]("bitnet-cfu-stress") action { (v, c) => BitNetCfuStress = true }
+    opt[Unit]("bitnet-cfu-pipe") action { (v, c) => BitNetCfuPipe = true }
     opt[Unit]("l2-cache") action { (v, c) => withL2Cache = true; vexii.lsuL1Coherency = true}
     opt[Unit]("with-hub") action { (v, c) => withHub = true; vexii.lsuL1Coherency = true}
     opt[Unit]("with-dma") action { (v, c) => withDma = true }
@@ -88,6 +102,10 @@ class MiCoSocParam {
     }
     if(useMiCoVpu){
       vexii.lsuMemDataWidthMin = vexii.lsuMemDataWidthMin max MiCoVpuBusWidth
+    }
+    if(useBitNetCfu){
+      require(!useMiCoVpu, "MiCo VPU and BitNet CFU currently share the single CPU CFU bus; enable only one of them")
+      vexii.lsuMemDataWidthMin = vexii.lsuMemDataWidthMin max BitNetCfuBusWidth
     }
   }
 }
