@@ -92,6 +92,8 @@ object PrivilegeMode {
     mode
   }
 
+  def mode(privilege: SInt): UInt = privilege(0, 2 bits).asUInt
+
   def apply(isGuest: Bool, privilege: UInt): SInt = apply(isGuest, privilege.asBits)
 
   def apply(mode: Int): SInt = spinal.core.S(mode, 3 bit)
@@ -251,6 +253,8 @@ object CSR {
   def HGATP       = 0x680 // HRW Hypervisor guest address translation and protection.
   def HTIMEDELTA  = 0x605 // HRW Delta for VS/VU-mode timer.
   def HTIMEDELTAH = 0x615 // HRW Upper 32 bits of htimedelta, RV32 only.
+  def HDLCTL      = 0x681 // HRW Hypervisor dirty log control.
+  def HDLIDX      = 0x682 // HRW Hypervisor dirty log control.
 
   val VSSTATUS    = 0x200
   val VSIE        = 0x204

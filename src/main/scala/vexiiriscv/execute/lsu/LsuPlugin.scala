@@ -223,19 +223,18 @@ class LsuPlugin(var layer : LaneLayer,
     retainer.release()
 
     val cbmCsr = withCbm generate new Area{
+      val privilege = pp.getPrivilege(0)
+      val isGuest = PrivilegeMode.isGuest(privilege)
+      val rawPrivilege = PrivilegeMode.mode(privilege)
+
       val invalIntoClean = False
-      def xenvcfg(priv : Int) = new Area{
-        val at = 0x00A + priv * 0x100
-        if(priv == PrivilegeMode.M) cap.allowCsr(at + 0x10) //Allow menvcfgh
-        val privLower = pp.getPrivilege(0) < priv
+
+      def xenvcfg(at: Int) = new Area{
         val cbie = RegInit(B"00")
         val cbcfe = RegInit(B"0")
-        invalIntoClean.setWhen(privLower && cbie === 1)
-
         cap.readWrite(at, 4 -> cbie, 6 -> cbcfe)
-        ds.addIllegalCheck{ ctrlLane =>
-          privLower && (ctrlLane(INVALIDATE) && cbie === 0 || ctrlLane(CLEAN) && cbcfe === 0  && privLower)
-        }
+
+        def denied(ctrlLane: CtrlLaneApi) = (ctrlLane(INVALIDATE) && cbie === 0) || (ctrlLane(CLEAN) && cbcfe === 0)
       }
 
       ds.addMicroOpDecodingDefault(CLEAN, False)
@@ -244,8 +243,22 @@ class LsuPlugin(var layer : LaneLayer,
       ds.addMicroOpDecoding(Rvi.CBM_FLUSH, CLEAN, True)
       ds.addMicroOpDecoding(Rvi.CBM_INVALIDATE, INVALIDATE, True)
 
-      val menvcfg = xenvcfg(PrivilegeMode.M)
-      val senvcfg = pp.implementSupervisor generate xenvcfg(PrivilegeMode.S)
+      val menvcfg = xenvcfg(CSR.MENVCFG)
+      val senvcfg = pp.implementSupervisor generate xenvcfg(CSR.SENVCFG)
+      val henvcfg = pp.implementHypervisor generate xenvcfg(CSR.HENVCFG)
+
+      invalIntoClean.setWhen(rawPrivilege =/= PrivilegeMode.M && menvcfg.cbie === 1)
+      if (pp.implementSupervisor) invalIntoClean.setWhen(rawPrivilege === PrivilegeMode.U && senvcfg.cbie === 1)
+      if (pp.implementHypervisor) invalIntoClean.setWhen(isGuest && henvcfg.cbie === 1)
+
+      ds.addIllegalCheck{ ctrlLane => privilege =/= PrivilegeMode.M && menvcfg.denied(ctrlLane) }
+      if (pp.implementSupervisor) ds.addIllegalCheck{ ctrlLane => privilege === PrivilegeMode.U && senvcfg.denied(ctrlLane) }
+
+      if (pp.implementHypervisor) ds.addVirtualInstructionCheck { ctrlLane =>
+        val vsCheck = privilege === PrivilegeMode.VS && henvcfg.denied(ctrlLane)
+        val vuCheck = privilege === PrivilegeMode.VU && (henvcfg.denied(ctrlLane) || senvcfg.denied(ctrlLane))
+        !menvcfg.denied(ctrlLane) && (vsCheck || vuCheck)
+      }
     }
 
     val hsl = pp.implementHypervisor generate new Area {
