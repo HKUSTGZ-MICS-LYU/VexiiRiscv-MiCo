@@ -49,7 +49,10 @@ class PerformanceCounterPlugin(var additionalCounterCount : Int,
     val eventInstructions = Vec.fill(widthOf(commitMask))(createEventPort(PerformanceCounterService.INSTRUCTIONS))
 
     var counterIdPtr = 0
-    class Counter extends Area{
+    val privValue = priv.getPrivilege(0)
+    val rawPrivValue = PrivilegeMode.mode(privValue)
+
+    class Counter(withOverflow: Boolean = true) extends Area{
       val alloc = ram.ramAllocate(if (withHigh) 2 else 1)
       val value = Reg(UInt(bufferWidth bits)).init(0)
       val needFlush = value.msb
@@ -60,13 +63,45 @@ class PerformanceCounterPlugin(var additionalCounterCount : Int,
       val scounteren = priv.p.withSupervisor generate csr.readWrite(RegInit(False), CSR.SCOUNTEREN, counterId)
       val hcounteren = priv.p.withHypervisor generate csr.readWrite(RegInit(False), CSR.HCOUNTEREN, counterId)
       val mcountinhibit = csr.readWrite(RegInit(False), CSR.MCOUNTINHIBIT, counterId)
+
+      val MINH    = RegInit(False)
+      val SINH    = RegInit(False)
+      val UINH    = RegInit(False)
+      val VSINH   = RegInit(False)
+      val VUINH   = RegInit(False)
+      val OF      = withOverflow generate RegInit(False)
+      val inhibit = CombInit(mcountinhibit)
+      val ofRead  = withOverflow generate CombInit(OF)
+
+      def mappingCfgCsr(eb: Int, eo: Int) = new Area {
+        if (withOverflow) ofRead clearWhen(!mcounteren && rawPrivValue =/= PrivilegeMode.M)
+
+        if (withOverflow) csr.readWrite(eb, 63-eo -> OF)
+        csr.readWrite(eb, 62-eo -> MINH)
+        inhibit.setWhen(privValue === PrivilegeMode.M && MINH)
+        if (priv.p.withSupervisor) {
+          csr.readWrite(eb, 61 - eo -> SINH)
+          inhibit.setWhen(privValue === PrivilegeMode.S && SINH)
+        }
+        if (priv.p.withUser) {
+          csr.readWrite(eb, 60 - eo -> UINH)
+          inhibit.setWhen(privValue === PrivilegeMode.U && UINH)
+        }
+        if (priv.p.withHypervisor) {
+          csr.readWrite(eb, 59 - eo -> VSINH, 58 - eo -> VUINH)
+          inhibit.setWhen(privValue === PrivilegeMode.VS && VSINH)
+          inhibit.setWhen(privValue === PrivilegeMode.VU && VUINH)
+          if (withOverflow) ofRead clearWhen(!hcounteren && PrivilegeMode.isGuest(privValue))
+        }
+      }
+
     }
     case class Mapping(csrId : Int, alloc : CsrRamAllocation, offset : Int)
     val mappings = ArrayBuffer[Mapping]()
     val counters = new Area{
-      val cycle = new Counter()
+      val cycle = new Counter(withOverflow = false)
       counterIdPtr += 1 //skip time
-      val instret = new Counter()
+      val instret = new Counter(withOverflow = false)
       val additionals = List.fill(additionalCounterCount)(new Counter)
 
       eventCycles := True
@@ -74,6 +109,18 @@ class PerformanceCounterPlugin(var additionalCounterCount : Int,
 
       cycle.value := cycle.value + (!cycle.mcountinhibit).asUInt
       instret.value := instret.value + RegNext(commitCount.andMask(!instret.mcountinhibit)).init(0)
+
+      Riscv.XLEN.get match {
+        case 32 => {
+          cycle.mappingCfgCsr(CSR.MCYCLECFGH, 32)
+          instret.mappingCfgCsr(CSR.MINSTRETCFGH, 32)
+          csr.allowCsr(CsrListFilter(List(CSR.MCYCLECFG, CSR.MINSTRETCFG)))
+        }
+        case 64 => {
+          cycle.mappingCfgCsr(CSR.MCYCLECFG, 0)
+          instret.mappingCfgCsr(CSR.MINSTRETCFG, 0)
+        }
+      }
 
       mappings += Mapping(CSR.MCYCLE, cycle.alloc, 0)
       mappings += Mapping(CSR.UCYCLE, cycle.alloc, 0)
@@ -136,18 +183,12 @@ class PerformanceCounterPlugin(var additionalCounterCount : Int,
       val counter = counters.additionals(id-3)
       val eventId = Reg(UInt(events.selWidth bits)) init(0)
       val overflowEvent = False
-      val OF   = RegInit(False) setWhen(overflowEvent)
-      val MINH = RegInit(False)
-      val SINH = RegInit(False)
-      val UINH = RegInit(False)
-      val VSINH = RegInit(False)
-      val VUINH = RegInit(False)
+      counter.OF setWhen(overflowEvent)
 
-      interrupt.ip.setWhen(overflowEvent && !OF)
+      interrupt.ip.setWhen(overflowEvent && !counter.OF)
 
       val incr    = if(events.sums.isEmpty) U(0) else events.sums.map(e => e._2.andMask(eventId === e._1).resize(events.widthMax)).toList.reduceBalancedTree(_ | _)
-      val inhibit = CombInit(counter.mcountinhibit)
-      when(!inhibit) {
+      when(!counter.inhibit) {
         counter.value := counter.value + incr
       }
       csr.readWrite(CSR.MHPMEVENT0 + id, 0 -> eventId)
@@ -156,28 +197,9 @@ class PerformanceCounterPlugin(var additionalCounterCount : Int,
         case 32 => (CSR.MHPMEVENT0H + id, 32)
         case 64 => (CSR.MHPMEVENT0  + id, 0)
       }
-      val privValue = priv.getPrivilege(0)
-      val rawPrivValue = PrivilegeMode.mode(privValue)
-      val ofRead = CombInit(OF)
-      if(withScountovf && priv.implementSupervisor) csr.read(CSR.SCOUNTOVF, id -> ofRead)
-      ofRead clearWhen(!counter.mcounteren && rawPrivValue =/= PrivilegeMode.M)
+      counter.mappingCfgCsr(eb, eo)
 
-      csr.readWrite(eb, 63-eo -> OF, 62-eo -> MINH)
-      inhibit.setWhen(privValue === PrivilegeMode.M && MINH)
-      if (priv.p.withSupervisor) {
-        csr.readWrite(eb, 61 - eo -> SINH)
-        inhibit.setWhen(privValue === PrivilegeMode.S && SINH)
-      }
-      if (priv.p.withUser) {
-        csr.readWrite(eb, 60 - eo -> UINH)
-        inhibit.setWhen(privValue === PrivilegeMode.U && UINH)
-      }
-      if (priv.p.withHypervisor) {
-        csr.readWrite(eb, 59 - eo -> VSINH, 58 - eo -> VUINH)
-        inhibit.setWhen(privValue === PrivilegeMode.VS && VSINH)
-        inhibit.setWhen(privValue === PrivilegeMode.VU && VUINH)
-        ofRead clearWhen(!counter.hcounteren && PrivilegeMode.isGuest(privValue))
-      }
+      if(withScountovf && priv.implementSupervisor) csr.read(CSR.SCOUNTOVF, id -> counter.ofRead)
     }
 
 

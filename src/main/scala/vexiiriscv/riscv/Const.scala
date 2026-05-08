@@ -193,10 +193,14 @@ object CSR {
   def MHPMCOUNTER0H = 0xB80 // MRW Machine instructions-retired counter.
   def MHPMCOUNTER3H = 0xB83 // MRW Machine instructions-retired counter.
   def MHPMEVENT0 = 0x320 // MRW Machine instructions-retired counter.
+  def MCYCLECFG = 0x321 // MRW Machine cycle counter configuration register.
+  def MINSTRETCFG = 0x322 // MRW Machine instret counter configuration register.
   def MHPMEVENT3 = 0x323 // MRW Machine instructions-retired counter.
   val MCOUNTEREN  = 0x306
   val MCOUNTINHIBIT = 0x320
   def MHPMEVENT0H = 0x720 // MRW Machine instructions-retired counter.
+  def MCYCLECFGH = 0x721 // MRW Upper 32 bits of mcyclecfg, RV32 only.
+  def MINSTRETCFGH = 0x722 // MRW Upper 32 bits of minstretcfg, RV32 only.
   def MTOPI     = 0xFB0 // MRO Machine top interrupt.
 
   val PMPCFG = 0x3a0
