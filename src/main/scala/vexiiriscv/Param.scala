@@ -458,6 +458,7 @@ class ParamSimple() {
         case e: BigInt => md ++= s" $e"
         case e: String => md ++= s" $e"
         case e : Product => md ++= s" $e"
+        case e: Set[_] => md ++= s" ${e.map(_.toString).toSeq.sorted.mkString(" ")}"
         case e => {
           if(e.getClass.getName == "scala.Enumeration$Val"){
             md ++= s" ${e.toString}"
