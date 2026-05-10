@@ -27,7 +27,8 @@ class ShadowMmuPlugin(var spec : MmuSpec,
 
   override def getInvalidationPortParam = AddressTranslationInvalidationParam(
     asidWidth       = 0,
-    requestAddress  = false
+    requestAddress  = false,
+    requestGuest    = false,
   )
 
   val api = during build new Area{

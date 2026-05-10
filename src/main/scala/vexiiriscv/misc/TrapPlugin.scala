@@ -448,6 +448,10 @@ class TrapPlugin(val trapAt : Int, val recordHtinst : Boolean) extends FiberPlug
             invalidate.cmd.hartId := hartId
             invalidate.cmd.address := 0
             invalidate.cmd.asid := 0
+            if (invalidate.p.requestGuest) {
+              invalidate.cmd.guest := False
+              invalidate.cmd.both := True
+            }
 
             val invalidated = RegInit(False) setWhen(invalidate.cmd.fire)
             invalidate.cmd.valid setWhen(!invalidated)
@@ -639,6 +643,11 @@ class TrapPlugin(val trapAt : Int, val recordHtinst : Boolean) extends FiberPlug
                     atsPorts.invalidate.cmd.valid := True
                     atsPorts.invalidate.cmd.address := pending.state.tval.asUInt.resized
                     atsPorts.invalidate.cmd.asid := pending.state.tval2.resized
+                    if (atsPorts.invalidate.p.requestGuest) {
+                      atsPorts.invalidate.cmd.guest := pending.state.arg(0)
+                      atsPorts.invalidate.cmd.both := False
+                    }
+
                     when(atsPorts.invalidate.cmd.ready) {
                       goto(JUMP)
                     }

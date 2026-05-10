@@ -207,7 +207,8 @@ trait GenericMmuPlugin extends AddressTranslationService {
  */
 class MmuPlugin(var spec : MmuSpec,
                 var physicalWidth : Int,
-                var asidWidth : Int) extends FiberPlugin with GenericMmuPlugin{
+                var asidWidth : Int,
+                var withGuestSfenceCheck : Boolean) extends FiberPlugin with GenericMmuPlugin{
   override def isShadowMmu : Boolean = false
 
   val api = during build new Area{
@@ -217,7 +218,8 @@ class MmuPlugin(var spec : MmuSpec,
 
   override def getInvalidationPortParam = AddressTranslationInvalidationParam(
     asidWidth       = asidWidth,
-    requestAddress  = true
+    requestAddress  = true,
+    requestGuest    = withGuestSfenceCheck
   )
 
   override def getSignExtension(kind: AddressTranslationPortUsage, rawAddress: UInt): Bool = {
@@ -241,6 +243,8 @@ class MmuPlugin(var spec : MmuSpec,
 
 
     awaitBuild()
+
+    assert(!withGuestSfenceCheck || priv.implementHypervisor)
 
     PHYSICAL_WIDTH.set(physicalWidth)
     VIRTUAL_WIDTH.set(spec.virtualWidth)
@@ -649,12 +653,15 @@ class MmuPlugin(var spec : MmuSpec,
       val busy = RegInit(False)
       val asid = RegInit(B(0, asidWidth bits))
       val address = RegInit(U(0, MIXED_WIDTH bits))
+      val guest = withGuestSfenceCheck generate RegInit(False)
+      val both = withGuestSfenceCheck generate RegInit(False)
 
       val anyAsid = (asidWidth > 0).mux(asid === 0, True)
       val anyAddress = address === 0
 
       def asidHit(entry: MmuTlbStorageEntry) = (asidWidth > 0).mux(anyAsid || entry.asid === asid, True)
       def addressHit(entry: MmuTlbStorageEntry) = anyAddress || entry.hit(address)
+      def guestHit(entry: MmuTlbStorageEntry) = withGuestSfenceCheck.mux(both || entry.guest === guest, True)
 
       arbiter.io.output.ready := False
       when(!busy){
@@ -663,12 +670,19 @@ class MmuPlugin(var spec : MmuSpec,
           busy := True
           asid := arbiter.io.output.asid.resized
           address := arbiter.io.output.address.resized
+          if (withGuestSfenceCheck) {
+            guest := arbiter.io.output.guest
+            both := arbiter.io.output.both
+          }
         }
       } otherwise {
         assert(HART_COUNT.get == 1)
         when (anyAddress) {
           for (storage <- storages; sl <- storage.sl) {
-            val mask = B(sl.ways.map(way => asidHit(way.readAsync(counter.resized))))
+            val mask = B(sl.ways.map(way => {
+              val entry = way.readAsync(counter.resized)
+              asidHit(entry) && guestHit(entry)
+            }))
             sl.write.mask := mask
             sl.write.address := counter.resized
             sl.write.data.valid := False
@@ -684,7 +698,7 @@ class MmuPlugin(var spec : MmuSpec,
             val targetAddress = address(sl.lineRange)
             val mask = B(sl.ways.map(way => {
               val entry = way.readAsync(targetAddress)
-              asidHit(entry) && addressHit(entry)
+              asidHit(entry) && addressHit(entry) && guestHit(entry)
             }))
             sl.write.mask := mask
             sl.write.address := targetAddress

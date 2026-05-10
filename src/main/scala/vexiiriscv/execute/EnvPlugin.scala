@@ -169,6 +169,7 @@ class EnvPlugin(layer : LaneLayer,
               trapPort.code := TrapReason.SFENCE_VMA
               trapPort.tval := srcp.SRC1.asBits.resized
               trapPort.tval2 := srcp.SRC2.asBits.resized
+              trapPort.arg(0) := isGuest
             }
             if(ps.p.withHypervisor) {
               when(privilege === PrivilegeMode.VU || privilege === PrivilegeMode.VS && vmaKoMapping(PrivilegeMode.VS)) {
@@ -197,6 +198,7 @@ class EnvPlugin(layer : LaneLayer,
               trapPort.code := TrapReason.SFENCE_VMA
               trapPort.tval := srcp.SRC1.asBits.resized
               trapPort.tval2 := srcp.SRC2.asBits.resized
+              trapPort.arg(0) := True
             }
             when(PrivilegeMode.isGuest(privilege)) {
               trapPort.code := CSR.MCAUSE_ENUM.VIRTUAL_INSTRUCTION

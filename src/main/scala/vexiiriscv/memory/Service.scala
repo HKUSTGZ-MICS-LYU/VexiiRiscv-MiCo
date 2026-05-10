@@ -78,13 +78,17 @@ case class AddressTranslationRefill(storageWidth : Int) extends Bundle{
 
 case class AddressTranslationInvalidationParam(
   asidWidth: Int = 0,
-  requestAddress: Boolean = false
+  requestAddress: Boolean = false,
+  requestGuest: Boolean = false
 )
 
 case class AddressTranslationInvalidationCmd(p: AddressTranslationInvalidationParam) extends Bundle {
   val hartId = HART_ID()
   val asid = Bits(p.asidWidth bits)
   val address = p.requestAddress generate MIXED_ADDRESS()
+  val guest = p.requestGuest generate Bool()
+  /* For match both guest and non-guest */
+  val both = p.requestGuest generate Bool()
 }
 
 /**
