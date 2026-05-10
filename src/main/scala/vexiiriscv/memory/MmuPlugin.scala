@@ -81,6 +81,7 @@ object MmuSpec{
 }
 
 case class MmuTlbStorageEntryParam(
+  asidWidth: Int,
   checkUser: Boolean,
   checkGuest: Boolean
 )
@@ -98,6 +99,7 @@ class MmuTlbStorageEntry(
   val valid = Bool()
   val virtualAddress  = UInt(vw-log2Up(depth) bits)
   val physicalAddress = UInt(pw bits)
+  val asid = Bits(p.asidWidth bits)
   val allowRead, allowWrite, allowExecute = Bool()
   val allowUser = p.checkUser generate Bool()
   val guest = p.checkGuest generate Bool()
@@ -310,6 +312,7 @@ class MmuPlugin(var spec : MmuSpec,
     assert(storageSpecs.map(_.p.priority).distinct.size == storageSpecs.size, "MMU storages needs different priorities")
     // Implement the hardware for all the TLB storages
     val tlbGenerateParam = MmuTlbStorageEntryParam(
+      asidWidth   = asidWidth,
       checkUser   = true,
       checkGuest  = priv.implementHypervisor
     )

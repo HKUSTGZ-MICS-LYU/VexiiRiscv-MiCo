@@ -87,6 +87,7 @@ class ShadowMmuPlugin(var spec : MmuSpec,
     assert(storageSpecs.map(_.p.priority).distinct.size == storageSpecs.size, "MMU storages needs different priorities")
     // Implement the hardware for all the TLB storages
     val tlbGenerateParam = MmuTlbStorageEntryParam(
+      asidWidth   = 0,
       checkUser   = false,
       checkGuest  = false
     )
