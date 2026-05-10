@@ -25,6 +25,11 @@ class ShadowMmuPlugin(var spec : MmuSpec,
   /* Second stage is always zero-extended */
   def getSignExtension(kind: AddressTranslationPortUsage, rawAddress: UInt) = False
 
+  override def getInvalidationPortParam = AddressTranslationInvalidationParam(
+    asidWidth       = 0,
+    requestAddress  = false
+  )
+
   val api = during build new Area{
     val fetchTranslationEnable = Bool()
     val lsuTranslationEnable = Bool()

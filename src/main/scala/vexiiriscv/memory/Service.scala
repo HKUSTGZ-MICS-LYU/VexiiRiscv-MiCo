@@ -76,15 +76,22 @@ case class AddressTranslationRefill(storageWidth : Int) extends Bundle{
   rsp.payload.setName("bits")
 }
 
-case class AddressTranslationInvalidationCmd() extends Bundle {
+case class AddressTranslationInvalidationParam(
+  asidWidth: Int = 0,
+  requestAddress: Boolean = false
+)
+
+case class AddressTranslationInvalidationCmd(p: AddressTranslationInvalidationParam) extends Bundle {
   val hartId = HART_ID()
+  val asid = Bits(p.asidWidth bits)
+  val address = p.requestAddress generate MIXED_ADDRESS()
 }
 
 /**
  * Used by the TrapPlugin to ask the MmuPlugin to invalidate its TLB (on SFENCE.VMA / SATP updates)
  */
-case class AddressTranslationInvalidation() extends Bundle {
-  val cmd = Stream(AddressTranslationInvalidationCmd())
+case class AddressTranslationInvalidation(p: AddressTranslationInvalidationParam) extends Bundle {
+  val cmd = Stream(AddressTranslationInvalidationCmd(p))
 }
 
 /**
@@ -99,6 +106,7 @@ trait AddressTranslationService extends Area {
   def getStorageId(s : Any) : Int
   def getStorageIdWidth() : Int
   def getSignExtension(kind : AddressTranslationPortUsage, rawAddress : UInt) : Bool
+  def getInvalidationPortParam : AddressTranslationInvalidationParam
 
   val regionRetainer = Retainer()
 
@@ -113,7 +121,7 @@ trait AddressTranslationService extends Area {
   def newRefillPort() = refillPorts.addRet(AddressTranslationRefill(getStorageIdWidth()))
 
   val invalidationPorts = ArrayBuffer[AddressTranslationInvalidation]()
-  def newInvalidationPort() = invalidationPorts.addRet(AddressTranslationInvalidation())
+  def newInvalidationPort() = invalidationPorts.addRet(AddressTranslationInvalidation(getInvalidationPortParam))
 }
 
 case class AddressTranslationReq(

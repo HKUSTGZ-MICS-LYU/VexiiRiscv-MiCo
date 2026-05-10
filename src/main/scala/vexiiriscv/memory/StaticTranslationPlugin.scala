@@ -22,6 +22,11 @@ class StaticTranslationPlugin(var physicalWidth: Int, val translationLevel : Int
   override def getStorageId(s: Any): Int = 0
   override def getStorageIdWidth(): Int = 0
 
+  override def getInvalidationPortParam = AddressTranslationInvalidationParam(
+    asidWidth       = 0,
+    requestAddress  = false
+  )
+
   case class PortSpec(stages: Seq[NodeBaseApi],
                       req: AddressTranslationReq,
                       usage: AddressTranslationPortUsage,

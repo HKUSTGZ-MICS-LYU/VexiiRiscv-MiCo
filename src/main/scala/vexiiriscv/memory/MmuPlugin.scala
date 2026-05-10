@@ -215,6 +215,11 @@ class MmuPlugin(var spec : MmuSpec,
     val lsuTranslationEnable = Bool()
   }
 
+  override def getInvalidationPortParam = AddressTranslationInvalidationParam(
+    asidWidth       = asidWidth,
+    requestAddress  = true
+  )
+
   override def getSignExtension(kind: AddressTranslationPortUsage, rawAddress: UInt): Bool = {
     val translationEnable = kind match {
       case AddressTranslationPortUsage.FETCH => api.fetchTranslationEnable
