@@ -351,11 +351,13 @@ class MmuPlugin(var spec : MmuSpec,
       val read = for (sl <- storage.sl) yield new Area {
         val readAddress = readStage(ps.req.PRE_ADDRESS)(sl.lineRange)
         val forceGuest = ctrlStage(ps.req.FORCE_GUEST) || effectiveGuest
+        val currentAsid = priv.implementHypervisor.mux(Mux(forceGuest, vsatp.asid, satp.asid), satp.asid)
         for ((way, wayId) <- sl.ways.zipWithIndex) {
           readStage(sl.keys.ENTRIES)(wayId) := way.readAsync(readAddress)
           hitsStage(sl.keys.HITS_PRE_VALID)(wayId) := hitsStage(sl.keys.ENTRIES)(wayId).hit(hitsStage(ps.req.PRE_ADDRESS))
           ctrlStage(sl.keys.HITS)(wayId) := ctrlStage(sl.keys.HITS_PRE_VALID)(wayId) &&
             ctrlStage(sl.keys.ENTRIES)(wayId).valid &&
+            (asidWidth > 0).mux(ctrlStage(sl.keys.ENTRIES)(wayId).asid === currentAsid, True) &&
             priv.implementHypervisor.mux(ctrlStage(sl.keys.ENTRIES)(wayId).guest === forceGuest, True)
         }
       }
@@ -621,6 +623,7 @@ class MmuPlugin(var spec : MmuSpec,
             val storageLevelId = storage.self.p.levels.filter(_.id <= levelId).map(_.id).max
             val storageLevel = storage.sl.find(_.slp.id == storageLevelId).get
             val specLevel = storageLevel.level
+            val currentAsid = priv.implementHypervisor.mux(Mux(isTwoStage, vsatp.asid, satp.asid), satp.asid)
 
             val sel = storageOhReg(sid)
             storageLevel.write.mask                 := UIntToOh(storageLevel.allocId).andMask(sel).resized
@@ -628,6 +631,7 @@ class MmuPlugin(var spec : MmuSpec,
             storageLevel.write.data.valid           := True
             storageLevel.write.data.virtualAddress  := virtual(specLevel.virtualOffset + log2Up(storageLevel.slp.sets), widthOf(storageLevel.write.data.virtualAddress) bits)
             storageLevel.write.data.physicalAddress := (load.levelToPhysicalAddress(levelId) >> specLevel.virtualOffset).resized
+            if (asidWidth > 0) storageLevel.write.data.asid := currentAsid
             storageLevel.write.data.allowRead       := load.flags.R
             storageLevel.write.data.allowWrite      := load.flags.W && load.flags.D
             storageLevel.write.data.allowExecute    := load.flags.X
