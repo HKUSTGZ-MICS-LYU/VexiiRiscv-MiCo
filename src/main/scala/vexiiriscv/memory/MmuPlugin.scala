@@ -288,11 +288,7 @@ class MmuPlugin(var spec : MmuSpec,
     csr.writeCancel(CSR.SATP, satpModeWrite =/= 0 && satpModeWrite =/= spec.satpMode)
 
     csr.allowCsr(CSR.SATP, !priv.logic.harts(0).m.status.tvm || priv.isMachine(0))
-    csr.onDecode(CSR.SATP) {
-      when (csr.bus.decode.write) {
-        csr.bus.decode.doTrap(TrapReason.SFENCE_VMA)
-      }
-    }
+    csr.trapNextOnWrite += CsrListFilter(List(CSR.SATP))
 
     if (priv.implementHypervisor) {
       csr.readWrite(CSR.VSSTATUS, 19 -> vsstatus.mxr, 18 -> vsstatus.sum)
@@ -304,11 +300,7 @@ class MmuPlugin(var spec : MmuSpec,
       csr.remapWhen(CSR.SATP, CSR.VSATP, PrivilegeMode.isGuest(priv.getPrivilege(0)))
 
       csr.allowCsr(CSR.VSATP, !priv.logic.harts(0).h.status.vtvm || priv.getPrivilege(0) =/= PrivilegeMode.VS)
-      csr.onDecode(CSR.VSATP) {
-        when (csr.bus.decode.write) {
-          csr.bus.decode.doTrap(TrapReason.SFENCE_VMA)
-        }
-      }
+      csr.trapNextOnWrite += CsrListFilter(List(CSR.VSATP))
     }
 
     csrLock.release()
