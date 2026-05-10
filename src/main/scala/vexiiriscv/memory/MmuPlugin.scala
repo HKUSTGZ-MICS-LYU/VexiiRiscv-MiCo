@@ -655,23 +655,49 @@ class MmuPlugin(var spec : MmuSpec,
       val depthMax = storageSpecs.map(_.p.levels.map(_.sets).max).max
       val counter = Reg(UInt(log2Up(depthMax) bits))
       val busy = RegInit(False)
+      val asid = RegInit(B(0, asidWidth bits))
+      val address = RegInit(U(0, MIXED_WIDTH bits))
+
+      val anyAsid = (asidWidth > 0).mux(asid === 0, True)
+      val anyAddress = address === 0
+
+      def asidHit(entry: MmuTlbStorageEntry) = (asidWidth > 0).mux(anyAsid || entry.asid === asid, True)
+      def addressHit(entry: MmuTlbStorageEntry) = anyAddress || entry.hit(address)
 
       arbiter.io.output.ready := False
       when(!busy){
         counter := 0
         when (arbiter.io.output.valid) {
           busy := True
+          asid := arbiter.io.output.asid.resized
+          address := arbiter.io.output.address.resized
         }
       } otherwise {
         assert(HART_COUNT.get == 1)
-        for (storage <- storages;
-             sl <- storage.sl) {
-          sl.write.mask := (default -> true)
-          sl.write.address := counter.resized
-          sl.write.data.valid := False
-        }
-        counter := counter + 1
-        when(counter.andR){
+        when (anyAddress) {
+          for (storage <- storages; sl <- storage.sl) {
+            val mask = B(sl.ways.map(way => asidHit(way.readAsync(counter.resized))))
+            sl.write.mask := mask
+            sl.write.address := counter.resized
+            sl.write.data.valid := False
+          }
+          counter := counter + 1
+          when(counter.andR){
+            busy := False
+            arbiter.io.output.ready := True
+          }
+        } otherwise {
+          /* Optimize for each way only has at most one set will hit */
+          for (storage <- storages; sl <- storage.sl) {
+            val targetAddress = address(sl.lineRange)
+            val mask = B(sl.ways.map(way => {
+              val entry = way.readAsync(targetAddress)
+              asidHit(entry) && addressHit(entry)
+            }))
+            sl.write.mask := mask
+            sl.write.address := targetAddress
+            sl.write.data.valid := False
+          }
           busy := False
           arbiter.io.output.ready := True
         }

@@ -446,6 +446,8 @@ class TrapPlugin(val trapAt : Int, val recordHtinst : Boolean) extends FiberPlug
             val invalidate = ats.newInvalidationPort()
             invalidate.cmd.valid := False
             invalidate.cmd.hartId := hartId
+            invalidate.cmd.address := 0
+            invalidate.cmd.asid := 0
 
             val invalidated = RegInit(False) setWhen(invalidate.cmd.fire)
             invalidate.cmd.valid setWhen(!invalidated)
@@ -635,6 +637,8 @@ class TrapPlugin(val trapAt : Int, val recordHtinst : Boolean) extends FiberPlug
                 is(TrapReason.SFENCE_VMA) {
                   if(ats.mayNeedRedo) {
                     atsPorts.invalidate.cmd.valid := True
+                    atsPorts.invalidate.cmd.address := pending.state.tval.asUInt.resized
+                    atsPorts.invalidate.cmd.asid := pending.state.tval2.resized
                     when(atsPorts.invalidate.cmd.ready) {
                       goto(JUMP)
                     }
