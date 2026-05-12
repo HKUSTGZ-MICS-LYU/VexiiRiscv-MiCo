@@ -1263,6 +1263,8 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         }
       }
 
+      def ImsicAreaOffset(id: Int) = id / XLEN * (1 + (XLEN.get == 64).toInt)
+
       def genImsicArea(ireg: Int, topei: Int, provider: (Int, Int) => CsrCondFilter) = new Area {
         val file = ImsicFile(hartIds(hartId), p.imsicInterrupts)
         val identity = file.identity
@@ -1272,13 +1274,12 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
 
         api.readWrite(file.threshold, provider(IndirectCSR.eithreshold, ireg))
 
-        val sources = for (interrupt <- file.interrupts) yield new Area {
-          val id = interrupt.id
-          val offset = id / XLEN * (1 + (XLEN.get == 64).toInt)
+        val sources = file.interrupts.map(i => ImsicAreaOffset(i.id)).distinct.map(offset => {
+          val interrupts = file.interrupts.filter(i => ImsicAreaOffset(i.id) == offset)
 
-          api.readWrite(interrupt.ie, provider(IndirectCSR.eie0 + offset, ireg), id % XLEN)
-          api.readWrite(interrupt.ip, provider(IndirectCSR.eip0 + offset, ireg), id % XLEN)
-        }
+          api.readWrite(provider(IndirectCSR.eie0 + offset, ireg), interrupts.map{i => i.id % XLEN -> i.ie}: _*)
+          api.readWrite(provider(IndirectCSR.eip0 + offset, ireg), interrupts.map{i => i.id % XLEN -> i.ip}: _*)
+        })
 
         api.read(topei, 0 -> identity, 16 -> identity)
         val claim = new Area {
@@ -1317,13 +1318,12 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
 
         api.readWrite(current.threshold, provider(IndirectCSR.eithreshold, ireg, valid))
 
-        val sources = for (interrupt <- current.interrupts) yield new Area {
-          val id = interrupt.id
-          val offset = id / XLEN * (1 + (XLEN.get == 64).toInt)
+        val sources = current.interrupts.map(i => ImsicAreaOffset(i.id)).distinct.map(offset => {
+          val interrupts = current.interrupts.filter(i => ImsicAreaOffset(i.id) == offset)
 
-          api.readWrite(interrupt.ie, provider(IndirectCSR.eie0 + offset, ireg, valid), id % XLEN)
-          api.readWrite(interrupt.ip, provider(IndirectCSR.eip0 + offset, ireg, valid), id % XLEN)
-        }
+          api.readWrite(provider(IndirectCSR.eie0 + offset, ireg, valid), interrupts.map{i => i.id % XLEN -> i.ie}: _*)
+          api.readWrite(provider(IndirectCSR.eip0 + offset, ireg, valid), interrupts.map{i => i.id % XLEN -> i.ip}: _*)
+        })
 
         api.read(topei, 0 -> rectifiedIdentity, 16 -> rectifiedIdentity)
         val claim = new Area {
