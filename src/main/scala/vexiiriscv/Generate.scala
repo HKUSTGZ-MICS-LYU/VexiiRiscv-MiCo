@@ -119,6 +119,8 @@ object GenerateTilelink extends App {
       val sei = (cpu.priv.get.sei != null) generate InterruptNode.master()
       if(sei != null) cpu.priv.get.sei << sei; in(sei.flag)
 
+      (cpu.priv.get.rdtime != null) generate in(cpu.priv.get.rdtime)
+
       val patcher = Fiber patch new AreaRoot {
         val hartId = param.withHartIdInput generate plugins.collectFirst{
           case p : PrivilegedPlugin => p.api.harts(0).hartId.toIo
