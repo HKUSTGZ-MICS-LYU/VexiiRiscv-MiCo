@@ -837,7 +837,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
 
         val gei = p.withGuestImsic generate new Area {
           val ie = Vec.fill(p.guestExternalInterruptFiles)(RegInit(False))
-          val ip = Vec(imsic.files.zip(imsic.eidelivery).map{case (file, eidelivery) => file.identity =/= 0 && eidelivery === 1})
+          val ip = Vec(imsic.files.zip(imsic.eidelivery).map{case (file, eidelivery) => file.identity =/= 0 && eidelivery})
           val iep = Vec(ie.zip(ip).map{case (ie, ip) => ie & ip})
 
           api.readWrite(CSR.HGEIE, 1 -> ie)
@@ -1138,7 +1138,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
           vseiPriority.external := False
           vseiPriority.default := InterruptInfo.defaultOrder.indexOf(9)
           when (h.imsic.valid && h.imsic.identity =/= 0) {
-            vseiPriority.local := h.imsic.current.identity.resized
+            vseiPriority.local := h.imsic.identity.resized
           } elsewhen (h.imsic.mux === 0 && h.victl.iid === 9 && h.victl.iprio =/= 0) {
             vseiPriority.local := h.victl.iprio.resized
           } otherwise {
@@ -1386,43 +1386,131 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
       }
 
       def genGuestImsicArea(ireg: Int, topei: Int, indirectApi: IndirectCsrApi) = new Area {
-        val files = for (geid <- 1 to p.guestExternalInterruptFiles) yield ImsicFile(hartIds(hartId), geid, p.imsicInterrupts)
-        val triggers = Vec(files.map(f => slave(cloneOf(f.trigger))))
+        val fileParameters = (1 to p.guestExternalInterruptFiles).map(geid => ImsicFileParameters(
+          hartId    = hartIds(hartId),
+          guestId   = geid,
+          sourceNum = p.imsicInterrupts,
+          xlen      = XLEN,
+          portNum   = 2
+        ))
+        val files = fileParameters.map(ImsicFileRam(_))
 
-        for((file, trigger) <- files.zip(triggers)) file.trigger << trigger
+        val dataWidth = log2Up(XLEN)
+        val triggers = Vec.fill(files.size)(slave(Stream(UInt(32 bits))))
+        val linkBus = triggers.zip(files).map{case (trigger, file) => new Area{
+          val port = file.ports(1)
+          val piped = trigger.m2sPipe()
+          val inRange = !piped.payload.drop(file.idWidth).orR
+          val data = B(1, XLEN.get bits) |<< piped.payload.resize(dataWidth)
+          port.cmd.op       := ImsicOp.WRITE
+          port.cmd.doIp     := True
+          port.cmd.address  := piped.payload.dropLow(dataWidth).asUInt.resized
+          port.cmd.data     := data
+          port.cmd.mask     := data
+          port.cmd.valid    := piped.valid && inRange
+          piped.ready       := !piped.valid || !inRange || port.cmd.ready
+        }}
 
         val mux = RegInit(U(0, log2Up(p.guestExternalInterruptFiles + 1) bits))
-        val current = ImsicFile.currentFileStatus(files, mux - 1)
-        val currentMux = current.vecMux
         val valid = mux =/= 0
-        val rectifiedIdentity = Mux(valid, current.identity, U(0))
+        val currentMux = Mux(valid, mux - 1, U(0)).resized
+        val identities = Vec(files.map(_.identity))
+        val identity = identities(currentMux)
+        val rectifiedIdentity = Mux(valid, identity, U(0))
 
-        api.readWrite(current.threshold, indirectApi.csrFilter(IndirectCSR.eithreshold, ireg, valid))
+        val linkCsr = new Area {
+          val iepFilter = indirectApi.csrCondFilter(id => eiepIdCheck(id), ireg)
+          val isIp = !indirectApi.iselect(6)
+          val address = indirectApi.iselect(5 downto (XLEN == 64).toInt).resized
 
-        val sources = current.interrupts.map(i => ImsicAreaOffset(i.id)).distinct.map(offset => {
-          val interrupts = current.interrupts.filter(i => ImsicAreaOffset(i.id) == offset)
+          val cmd = cloneOf(files(0).ports(0).cmd)
+          val cmdLink = StreamDemux(cmd, mux, p.guestExternalInterruptFiles + 1)
+          cmdLink(0).ready := True
+          cmd.op := ImsicOp.READ
+          cmd.doIp := isIp
+          cmd.address := address
+          cmd.data := B(0, XLEN.get bits)
+          cmd.mask := B(0, XLEN.get bits)
+          cmd.valid := False
 
-          api.readWrite(indirectApi.csrFilter(IndirectCSR.eie0 + offset, ireg, valid), interrupts.map{i => i.id % XLEN -> i.ie}: _*)
-          api.readWrite(indirectApi.csrFilter(IndirectCSR.eip0 + offset, ireg, valid), interrupts.map{i => i.id % XLEN -> i.ip}: _*)
-        })
+          val rsps = Vec.fill(p.guestExternalInterruptFiles + 1)(cloneOf(files(0).ports(0).rsp))
+          rsps(0).valid := True
+          rsps(0).data := B(0)
+          val rsp = rsps(mux)
 
-        api.read(topei, 0 -> rectifiedIdentity, 16 -> rectifiedIdentity)
-        val claim = new Area {
-          val toClaim = RegInit(U(0, current.idWidth bits))
-          api.onRead(topei, false){
-            toClaim := rectifiedIdentity
+          files.foreach(file => {
+            val cmd = cmdLink(file.p.guestId)
+            val rsp = rsps(file.p.guestId)
+            file.ports(0).cmd << cmd
+            rsp << file.ports(0).rsp
+          })
+
+          val pending = RegInit(False) setWhen(cmd.fire) clearWhen(rsp.valid)
+          api.read(rsp.data.andMask(rsp.valid), iepFilter)
+          api.allowCsr(iepFilter, valid)
+
+          api.onRead(iepFilter, false) {
+            cmd.op := ImsicOp.READ
+            cmd.valid := !pending
+            when(!rsp.valid) {
+              cap.bus.read.doHalt()
+            }
           }
-          api.onWrite(topei, true) {
-            when (valid) {
-              current.claim(toClaim)
+
+          api.onWrite(iepFilter, false) {
+            val writeMask = B(XLEN.get bits, default -> True)
+
+            val data = Mux(cap.bus.write.mask,
+              cap.bus.write.clear ? B(0, XLEN.get bits) | cap.bus.write.maskBit,
+              cap.bus.write.bits
+            )
+            val mask = Mux(cap.bus.write.mask, cap.bus.write.maskBit, writeMask)
+
+            cmd.op := ImsicOp.WRITE
+            cmd.data := data
+            cmd.mask := mask
+            cmd.valid := !pending
+            when(!rsp.valid) {
+              cap.bus.write.doHalt()
+            }
+          }
+
+          api.read(topei, 0 -> rectifiedIdentity, 16 -> rectifiedIdentity)
+          api.allowCsr(topei, valid)
+          val claim = new Area {
+            val toClaim = RegInit(U(0, files(0).idWidth bits))
+            api.onRead(topei, false){
+              toClaim := rectifiedIdentity
+            }
+            api.onWrite(topei, false) {
+              cmd.op := ImsicOp.WRITE
+              cmd.doIp := True
+              cmd.address := toClaim.drop(log2Up(XLEN)).asUInt
+              cmd.data := B(0, XLEN.get bits)
+              cmd.mask := B(1, XLEN.get bits) |<< toClaim(dataWidth-1 downto 0)
+              cmd.valid := !pending
+              when(!rsp.valid) {
+                cap.bus.write.doHalt()
+              }
             }
           }
         }
 
-        val eidelivery = Vec.fill(p.guestExternalInterruptFiles)(RegInit(U(0x40000000, XLEN bits)))
-        api.readWrite(eidelivery(currentMux), indirectApi.csrFilter(IndirectCSR.eidelivery, ireg, valid))
+        val thresholds = Vec(files.map(_.threshold))
+        val eithresholdFilter = indirectApi.csrFilter(IndirectCSR.eithreshold, ireg)
+        api.allowCsr(eithresholdFilter, valid)
+        api.readWrite(thresholds(currentMux), indirectApi.csrFilter(IndirectCSR.eithreshold, ireg, valid))
 
-        def deliveryArbiter(): Bool = eidelivery(currentMux) === 1 && valid
+        /* eidelivery only supports 0/1 */
+        val eidelivery = Vec.fill(p.guestExternalInterruptFiles)(RegInit(False))
+        val eideliveryFilter = indirectApi.csrFilter(IndirectCSR.eidelivery, ireg)
+        api.allowCsr(eideliveryFilter, valid)
+        api.read(eidelivery(currentMux), eideliveryFilter)
+        api.onWrite(eideliveryFilter, true) {
+          eidelivery(currentMux) := cap.bus.write.bits === 0x1
+        }
+
+        def deliveryArbiter(): Bool = eidelivery(currentMux) && valid
       }
 
       def HostCsrFilter(id: Int): Any = p.withHypervisor.mux(HostCsrFilter(id, True), id)
