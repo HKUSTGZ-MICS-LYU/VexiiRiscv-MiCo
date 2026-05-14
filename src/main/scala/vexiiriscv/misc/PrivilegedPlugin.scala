@@ -1421,7 +1421,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         val linkCsr = new Area {
           val iepFilter = indirectApi.csrCondFilter(id => eiepIdCheck(id), ireg)
           val isIp = !indirectApi.iselect(6)
-          val address = indirectApi.iselect(5 downto (XLEN == 64).toInt).resized
+          val address = indirectApi.iselect(5 downto (XLEN.get == 64).toInt).resized
 
           val cmd = cloneOf(files(0).ports(0).cmd)
           val cmdLink = StreamDemux(cmd, mux, p.guestExternalInterruptFiles + 1)
