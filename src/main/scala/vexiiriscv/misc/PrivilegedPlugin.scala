@@ -1263,41 +1263,122 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         }
       }
 
-      def ImsicAreaOffset(id: Int) = id / XLEN * (1 + (XLEN.get == 64).toInt)
+      def eiepIdCheck(id: UInt) = {
+        val mainCheck = (id >> 7) === 1
+        val xlenCheck = (XLEN.get == 64).mux(!id(0), True)
+        val lineNums = p.imsicInterrupts / XLEN.get
+        val idCheck = (p.imsicInterrupts == 2048).mux(True, id(5 downto (XLEN.get == 64).toInt) < lineNums)
+
+        /* eie/eip = 0x80 ~ 0xff */
+        mainCheck && xlenCheck && idCheck
+      }
 
       def genImsicArea(ireg: Int, topei: Int, indirectApi: IndirectCsrApi) = new Area {
-        val file = ImsicFile(hartIds(hartId), p.imsicInterrupts)
-        val identity = file.identity
-        val trigger = slave(cloneOf(file.trigger))
+        val fileParameters = ImsicFileParameters(
+          hartId    = hartIds(hartId),
+          guestId   = 0,
+          sourceNum = p.imsicInterrupts,
+          xlen      = XLEN,
+          portNum   = 2
+        )
+        val file = ImsicFileRam(fileParameters)
 
-        file.trigger << trigger
+        val dataWidth = log2Up(XLEN)
+        val trigger = slave(Stream(UInt(32 bits)))
+        val linkBus = new Area {
+          val port = file.ports(1)
+          val piped = trigger.m2sPipe()
+          val inRange = !piped.payload.drop(file.idWidth).orR
+          val data = B(1, XLEN.get bits) |<< piped.payload.resize(dataWidth)
+          port.cmd.op       := ImsicOp.WRITE
+          port.cmd.doIp     := True
+          port.cmd.address  := piped.payload.dropLow(dataWidth).asUInt.resized
+          port.cmd.data     := data
+          port.cmd.mask     := data
+          port.cmd.valid    := piped.valid && inRange
+          piped.ready       := !piped.valid || !inRange || port.cmd.ready
+        }
 
-        api.readWrite(file.threshold, indirectApi.csrFilter(IndirectCSR.eithreshold, ireg))
+        val linkCsr = new Area {
+          val port = file.ports(0)
 
-        val sources = file.interrupts.map(i => ImsicAreaOffset(i.id)).distinct.map(offset => {
-          val interrupts = file.interrupts.filter(i => ImsicAreaOffset(i.id) == offset)
+          val iepFilter = indirectApi.csrCondFilter(id => eiepIdCheck(id), ireg)
+          val isIp = !indirectApi.iselect(6)
+          val address = indirectApi.iselect(5 downto (XLEN.get == 64).toInt).resized
 
-          api.readWrite(indirectApi.csrFilter(IndirectCSR.eie0 + offset, ireg), interrupts.map{i => i.id % XLEN -> i.ie}: _*)
-          api.readWrite(indirectApi.csrFilter(IndirectCSR.eip0 + offset, ireg), interrupts.map{i => i.id % XLEN -> i.ip}: _*)
-        })
+          port.cmd.op := ImsicOp.READ
+          port.cmd.doIp := isIp
+          port.cmd.address := address
+          port.cmd.data := B(0, XLEN.get bits)
+          port.cmd.mask := B(0, XLEN.get bits)
+          port.cmd.valid := False
 
-        api.read(topei, 0 -> identity, 16 -> identity)
-        val claim = new Area {
-          val toClaim = RegInit(U(0, file.idWidth bits))
-          api.onRead(topei, false){
-            toClaim := identity
+          val pending = RegInit(False) setWhen(port.cmd.fire) clearWhen(port.rsp.valid)
+          api.read(port.rsp.data.andMask(port.rsp.valid), iepFilter)
+
+          api.onRead(iepFilter, false) {
+            port.cmd.op := ImsicOp.READ
+            port.cmd.valid := !pending
+            when(!port.rsp.valid) {
+              cap.bus.read.doHalt()
+            }
           }
-          api.onWrite(topei, true) {
-            file.claim(toClaim)
+
+          api.onWrite(iepFilter, false) {
+            val writeMask = B(XLEN.get bits, default -> True)
+
+            val data = Mux(cap.bus.write.mask,
+              cap.bus.write.clear ? B(0, XLEN.get bits) | cap.bus.write.maskBit,
+              cap.bus.write.bits
+            )
+            val mask = Mux(cap.bus.write.mask, cap.bus.write.maskBit, writeMask)
+
+            port.cmd.op := ImsicOp.WRITE
+            port.cmd.data := data
+            port.cmd.mask := mask
+            port.cmd.valid := !pending
+            when(!port.rsp.valid) {
+              cap.bus.write.doHalt()
+            }
+          }
+
+          val identity = file.identity
+          api.read(topei, 0 -> identity, 16 -> identity)
+          val claim = new Area {
+            val toClaim = RegInit(U(0, file.idWidth bits))
+            api.onRead(topei, false){
+              toClaim := identity
+            }
+            api.onWrite(topei, false) {
+              port.cmd.op := ImsicOp.WRITE
+              port.cmd.doIp := True
+              port.cmd.address := toClaim.drop(log2Up(XLEN)).asUInt
+              port.cmd.data := B(0, XLEN.get bits)
+              port.cmd.mask := B(1, XLEN.get bits) |<< toClaim(dataWidth-1 downto 0)
+              port.cmd.valid := !pending
+              when(!port.rsp.valid) {
+                cap.bus.write.doHalt()
+              }
+            }
           }
         }
 
+        api.readWrite(file.threshold, indirectApi.csrFilter(IndirectCSR.eithreshold, ireg))
+
         val eidelivery = RegInit(U(0x40000000, XLEN bits))
-        api.readWrite(eidelivery, indirectApi.csrFilter(IndirectCSR.eidelivery, ireg))
+        val eideliveryFilter = indirectApi.csrFilter(IndirectCSR.eidelivery, ireg)
+        api.read(eidelivery, eideliveryFilter)
+        api.onWrite(eideliveryFilter, true) {
+          eidelivery := cap.bus.write.bits.mux(
+            0x40000000 -> U(0x40000000, XLEN bits),
+            0x1 -> U(1, XLEN bits),
+            default -> U(0, XLEN bits)
+          )
+        }
 
         def deliveryArbiter(aplicTarget: Bool): Bool = {
           eidelivery.mux(
-            1 -> (identity > 0),
+            1 -> file.interrupt,
             0x40000000 -> aplicTarget,
             default -> False
           )
