@@ -652,7 +652,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
           readWrite(XLEN - 1 -> interrupt, 0 -> code)
         }
 
-        val imsic = p.withImsic generate genImsicArea(CSR.MIREG, CSR.MTOPEI, indirectHart.m.csrFilter(_, _))
+        val imsic = p.withImsic generate genImsicArea(CSR.MIREG, CSR.MTOPEI, indirectHart.m)
 
         val ip = new api.Csr(CSR.MIP) {
           val mext = if (p.withImsic) imsic.deliveryArbiter(int.m.external) else int.m.external
@@ -824,7 +824,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
           for ((id, enable) <- mapping) readWrite(id -> enable)
         }
 
-        val imsic = p.withGuestImsic generate genGuestImsicArea(CSR.VSIREG, CSR.VSTOPEI, indirectHart.vs.csrFilter(_, _, _))
+        val imsic = p.withGuestImsic generate genGuestImsicArea(CSR.VSIREG, CSR.VSTOPEI, indirectHart.vs)
         if (p.withGuestImsic) {
           api.remapWhen(CSR.STOPEI, CSR.VSTOPEI, withGuestPrivilege)
           api.read(CSR.HSTATUS, 12 -> imsic.mux)
@@ -937,7 +937,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
           val interrupt = if (p.withSSTC) logic.ip else False
         }
 
-        val imsic = p.withImsic generate genImsicArea(CSR.SIREG, CSR.STOPEI, indirectHart.s.csrFilter(_, _))
+        val imsic = p.withImsic generate genImsicArea(CSR.SIREG, CSR.STOPEI, indirectHart.s)
 
         val ip = new Area {
           val sext = if (p.withImsic) imsic.deliveryArbiter(int.s.external) else int.s.external
@@ -1265,20 +1265,20 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
 
       def ImsicAreaOffset(id: Int) = id / XLEN * (1 + (XLEN.get == 64).toInt)
 
-      def genImsicArea(ireg: Int, topei: Int, provider: (Int, Int) => CsrCondFilter) = new Area {
+      def genImsicArea(ireg: Int, topei: Int, indirectApi: IndirectCsrApi) = new Area {
         val file = ImsicFile(hartIds(hartId), p.imsicInterrupts)
         val identity = file.identity
         val trigger = slave(cloneOf(file.trigger))
 
         file.trigger << trigger
 
-        api.readWrite(file.threshold, provider(IndirectCSR.eithreshold, ireg))
+        api.readWrite(file.threshold, indirectApi.csrFilter(IndirectCSR.eithreshold, ireg))
 
         val sources = file.interrupts.map(i => ImsicAreaOffset(i.id)).distinct.map(offset => {
           val interrupts = file.interrupts.filter(i => ImsicAreaOffset(i.id) == offset)
 
-          api.readWrite(provider(IndirectCSR.eie0 + offset, ireg), interrupts.map{i => i.id % XLEN -> i.ie}: _*)
-          api.readWrite(provider(IndirectCSR.eip0 + offset, ireg), interrupts.map{i => i.id % XLEN -> i.ip}: _*)
+          api.readWrite(indirectApi.csrFilter(IndirectCSR.eie0 + offset, ireg), interrupts.map{i => i.id % XLEN -> i.ie}: _*)
+          api.readWrite(indirectApi.csrFilter(IndirectCSR.eip0 + offset, ireg), interrupts.map{i => i.id % XLEN -> i.ip}: _*)
         })
 
         api.read(topei, 0 -> identity, 16 -> identity)
@@ -1293,7 +1293,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         }
 
         val eidelivery = RegInit(U(0x40000000, XLEN bits))
-        api.readWrite(eidelivery, provider(IndirectCSR.eidelivery, ireg))
+        api.readWrite(eidelivery, indirectApi.csrFilter(IndirectCSR.eidelivery, ireg))
 
         def deliveryArbiter(aplicTarget: Bool): Bool = {
           eidelivery.mux(
@@ -1304,7 +1304,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         }
       }
 
-      def genGuestImsicArea(ireg: Int, topei: Int, provider: (Int, Int, Bool) => CsrCondFilter) = new Area {
+      def genGuestImsicArea(ireg: Int, topei: Int, indirectApi: IndirectCsrApi) = new Area {
         val files = for (geid <- 1 to p.guestExternalInterruptFiles) yield ImsicFile(hartIds(hartId), geid, p.imsicInterrupts)
         val triggers = Vec(files.map(f => slave(cloneOf(f.trigger))))
 
@@ -1316,13 +1316,13 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         val valid = mux =/= 0
         val rectifiedIdentity = Mux(valid, current.identity, U(0))
 
-        api.readWrite(current.threshold, provider(IndirectCSR.eithreshold, ireg, valid))
+        api.readWrite(current.threshold, indirectApi.csrFilter(IndirectCSR.eithreshold, ireg, valid))
 
         val sources = current.interrupts.map(i => ImsicAreaOffset(i.id)).distinct.map(offset => {
           val interrupts = current.interrupts.filter(i => ImsicAreaOffset(i.id) == offset)
 
-          api.readWrite(provider(IndirectCSR.eie0 + offset, ireg, valid), interrupts.map{i => i.id % XLEN -> i.ie}: _*)
-          api.readWrite(provider(IndirectCSR.eip0 + offset, ireg, valid), interrupts.map{i => i.id % XLEN -> i.ip}: _*)
+          api.readWrite(indirectApi.csrFilter(IndirectCSR.eie0 + offset, ireg, valid), interrupts.map{i => i.id % XLEN -> i.ie}: _*)
+          api.readWrite(indirectApi.csrFilter(IndirectCSR.eip0 + offset, ireg, valid), interrupts.map{i => i.id % XLEN -> i.ip}: _*)
         })
 
         api.read(topei, 0 -> rectifiedIdentity, 16 -> rectifiedIdentity)
@@ -1339,7 +1339,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         }
 
         val eidelivery = Vec.fill(p.guestExternalInterruptFiles)(RegInit(U(0x40000000, XLEN bits)))
-        api.readWrite(eidelivery(currentMux), provider(IndirectCSR.eidelivery, ireg, valid))
+        api.readWrite(eidelivery(currentMux), indirectApi.csrFilter(IndirectCSR.eidelivery, ireg, valid))
 
         def deliveryArbiter(): Bool = eidelivery(currentMux) === 1 && valid
       }
