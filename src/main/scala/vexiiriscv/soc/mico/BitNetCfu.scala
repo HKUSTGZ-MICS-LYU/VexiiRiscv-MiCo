@@ -56,7 +56,7 @@ case class BitNetCfuParameter(
   var vlen : Int = 256,
   var xlen : Int = 32,
   var maclen : Int = 256,
-  var vregs : Int = 2,
+  var weightBanks : Int = 1,
   var qType : String = "1.5b",
   var noWaitCompute : Boolean = false,
   var rfRam : Boolean = true,
@@ -74,12 +74,13 @@ class BitNetCfu(cfuParam: CfuBusParameter,
 
   val xlen = busParam.dataWidth
   val vlen = p.vlen
-  val vregs = p.vregs
+  val weightBanks = p.weightBanks
   val maclen = p.maclen
   val lanes = maclen / 8
   val weightSliceBitsMax = lanes * 2
   val vlenLog2 = log2Up(vlen)
-  val vregsLog2 = log2Up(vregs)
+  val weightBankLog2 = log2Up(weightBanks) max 1
+  val loadSelWidth = log2Up(weightBanks + 1) max 1
   val nLoad = vlen / xlen
   val nCompute = vlen / maclen
   val reslen = cfuParam.CFU_OUTPUT_DATA_W
@@ -91,6 +92,7 @@ class BitNetCfu(cfuParam: CfuBusParameter,
   assert(vlen % maclen == 0, "BitNetCfu vlen must be a multiple of maclen")
   assert(maclen % 8 == 0, "BitNetCfu maclen must hold complete int8 activation lanes")
   assert(weightSliceBitsMax <= vlen, "BitNetCfu weight slice must fit in one vector register")
+  assert(weightBanks >= 1, "BitNetCfu must have at least one low-bit weight bank")
 
   val io = new Bundle {
     val bus = slave(CfuBus(cfuParam))
@@ -101,13 +103,13 @@ class BitNetCfu(cfuParam: CfuBusParameter,
   val isLoad   = func3 === B"100"
   val isConfig = func3 === B"010"
   val isBDot   = func3 === B"001"
-
-  val vectorRegsReg = Vec(Reg(Bits(vlen bits)) init(0), vregs)
-  val vectorRegsBank = p.rfRam generate new Area {
-    val banks = Seq.fill(nLoad)(Mem(Bits(xlen bits), wordCount = vregs))
+  val int8Reg = Vec(Reg(Bits(xlen bits)) init(0), nLoad)
+  val weightRegsReg = Vec(Reg(Bits(vlen bits)) init(0), weightBanks)
+  val weightRegsBank = p.rfRam generate new Area {
+    val banks = Seq.fill(nLoad)(Mem(Bits(xlen bits), wordCount = weightBanks))
     val wdata = Bits(xlen bits)
     val wen = Vec.fill(nLoad)(Bool())
-    val waddr = UInt(vregsLog2 bits)
+    val waddr = UInt(weightBankLog2 bits)
 
     wdata := 0
     wen.foreach(_ := False)
@@ -122,23 +124,33 @@ class BitNetCfu(cfuParam: CfuBusParameter,
     }
   }
 
-  def vectorRead(addr: UInt): Bits = {
+  def int8Read(): Bits = int8Reg.reverse.reduce(_ ## _)
+
+  def int8Write(index: UInt, data: Bits): Unit = {
+    int8Reg(index) := data
+  }
+
+  def weightRead(addr: UInt): Bits = {
     if(p.rfRam) {
-      val reads = vectorRegsBank.banks.map(_.readAsync(addr))
+      val reads = weightRegsBank.banks.map(_.readAsync(addr))
       reads.reverse.reduce(_ ## _)
     } else {
-      vectorRegsReg(addr)
+      if(weightBanks == 1) weightRegsReg(0) else weightRegsReg(addr)
     }
   }
 
-  def vectorWrite(addr: UInt, index: UInt, data: Bits): Unit = {
+  def weightWrite(addr: UInt, index: UInt, data: Bits): Unit = {
     if(p.rfRam) {
-      vectorRegsBank.waddr := addr
-      vectorRegsBank.wdata := data
-      vectorRegsBank.wen(index) := True
+      weightRegsBank.waddr := addr
+      weightRegsBank.wdata := data
+      weightRegsBank.wen(index) := True
     } else {
       val offset = index.resized << log2Up(xlen)
-      vectorRegsReg(addr)(offset, xlen bits) := data
+      if(weightBanks == 1) {
+        weightRegsReg(0)(offset, xlen bits) := data
+      } else {
+        weightRegsReg(addr)(offset, xlen bits) := data
+      }
     }
   }
 
@@ -148,16 +160,14 @@ class BitNetCfu(cfuParam: CfuBusParameter,
   if(cfuParam.CFU_WITH_STATUS) io.bus.rsp.status := B"000"
 
   val decode = new Area {
-    val RS1 = UInt(vregsLog2 bits)
-    val RS2 = UInt(vregsLog2 bits)
+    val BANK = UInt(loadSelWidth bits)
 
-    RS1 := io.bus.cmd.raw_insn(19 downto 15).resize(vregsLog2).asUInt
-    RS2 := io.bus.cmd.raw_insn(24 downto 20).resize(vregsLog2).asUInt
+    BANK := io.bus.cmd.inputs(1).asUInt.resize(loadSelWidth)
   }
 
-  val loadRD = Reg(UInt(vregsLog2 bits)) init(0)
+  val loadRD = Reg(UInt(loadSelWidth bits)) init(0)
   val rs1Offset = Reg(UInt(vlenLog2 bits)) init(0)
-  val rs2Offset = Reg(UInt(vlenLog2 bits)) init(0)
+  val weightOffsets = Vec(Reg(UInt(vlenLog2 bits)) init(0), weightBanks)
 
   val config = new Area {
     val qType = U(p.qTypeId, 2 bits)
@@ -170,17 +180,18 @@ class BitNetCfu(cfuParam: CfuBusParameter,
   }
 
   val rfRead = new Area {
-    val RS1 = Reg(UInt(vregsLog2 bits)) init(0)
-    val RS2 = Reg(UInt(vregsLog2 bits)) init(0)
+    val BANK = Reg(UInt(loadSelWidth bits)) init(1)
 
     when(io.bus.cmd.fire && isBDot) {
-      RS1 := decode.RS1
-      RS2 := decode.RS2
+      BANK := decode.BANK
     }
 
     val isFirst = p.noWaitCompute.mux(rs1Offset === 0, False)
-    val rs1 = vectorRead(isFirst.mux(decode.RS1, RS1))
-    val rs2 = vectorRead(isFirst.mux(decode.RS2, RS2))
+    val sel = isFirst.mux(decode.BANK, BANK)
+    val bank = (sel - U(1, loadSelWidth bits)).resize(weightBankLog2)
+    val int8 = int8Read()
+    val weight = weightRead(bank)
+    val weightOffset = if(weightBanks == 1) weightOffsets(0) else weightOffsets(bank)
   }
 
   val compute = new Area {
@@ -208,12 +219,18 @@ class BitNetCfu(cfuParam: CfuBusParameter,
       if(nCompute != 1) rs1Offset := rs1Offset + U(maclen, vlenLog2 bits)
     }
     when(shiftRs2) {
-      rs2Offset := rs2Offset + config.weightInc
+      if(weightBanks == 1) {
+        weightOffsets(0) := rfRead.weightOffset + config.weightInc
+      } else {
+        weightOffsets(rfRead.bank) := rfRead.weightOffset + config.weightInc
+      }
     }
 
     val extract = new extractStage.Area {
-      OPA := rfRead.rs1(rs1Offset, maclen bits)
-      OPW := rfRead.rs2(rs2Offset, weightSliceBitsMax bits)
+      val opwQ1 = rfRead.weight(rfRead.weightOffset, lanes bits).resize(weightSliceBitsMax)
+      val opwWide = rfRead.weight(rfRead.weightOffset, weightSliceBitsMax bits)
+      OPA := rfRead.int8(rs1Offset, maclen bits)
+      OPW := (config.qType === U(Q1B, 2 bits)).mux(opwQ1, opwWide)
       QTYPE := config.qType
       SEL := sel
       DONE := doneNow
@@ -281,7 +298,6 @@ class BitNetCfu(cfuParam: CfuBusParameter,
               io.bus.rsp.valid := True
               io.bus.rsp.outputs(0) := compute.res.asBits
               rs1Offset := 0
-              rs2Offset := 0
               compute.acc := 0
             } else {
               goto(BDOTP)
@@ -293,7 +309,7 @@ class BitNetCfu(cfuParam: CfuBusParameter,
         when(isConfig) {
           io.bus.rsp.valid := True
           rs1Offset := 0
-          rs2Offset := 0
+          weightOffsets.foreach(_ := U(0, vlenLog2 bits))
           compute.acc := 0
         }
       }
@@ -312,12 +328,20 @@ class BitNetCfu(cfuParam: CfuBusParameter,
 
     LOAD.onEntry {
       baseAddr := io.bus.cmd.inputs(0).asUInt.resized
-      loadRD := io.bus.cmd.raw_insn(24 downto 20).resize(vregsLog2).asUInt
+      loadRD := decode.BANK
       offsetAddr := 0
       memFireId := 0
       memValid := True
       memReady := True
       loadVecHits.foreach(_ := False)
+      when(decode.BANK =/= 0) {
+        val bank = (decode.BANK - U(1, loadSelWidth bits)).resize(weightBankLog2)
+        if(weightBanks == 1) {
+          weightOffsets(0) := U(0, vlenLog2 bits)
+        } else {
+          weightOffsets(bank) := U(0, vlenLog2 bits)
+        }
+      }
     }
 
     LOAD.whenIsActive {
@@ -336,7 +360,11 @@ class BitNetCfu(cfuParam: CfuBusParameter,
           goto(IDLE)
         }
         loadVecHits(io.dBus.d.source) := True
-        vectorWrite(loadRD, io.dBus.d.source, io.dBus.d.data)
+        when(loadRD === 0) {
+          int8Write(io.dBus.d.source, io.dBus.d.data)
+        } otherwise {
+          weightWrite((loadRD - U(1, loadSelWidth bits)).resize(weightBankLog2), io.dBus.d.source, io.dBus.d.data)
+        }
       }
     }
 

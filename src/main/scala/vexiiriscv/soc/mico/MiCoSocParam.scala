@@ -19,13 +19,14 @@ class MiCoSocParam {
   var useMiCoVpu = false
   var MiCoVpuLen = 256
   var MiCoVpuWidth = 256
-  var MiCoVpuBusWidth = 32
+  var MiCoVpuBusWidth = 64
   var MiCoVpuStress = false
   var MiCoVpuPipe = false
   var useBitNetCfu = false
   var BitNetCfuLen = 256
   var BitNetCfuWidth = 256
   var BitNetCfuBusWidth = 32
+  var BitNetCfuWeightBanks = 1
   var BitNetCfuQType = "1.5b"
   var BitNetCfuStress = false
   var BitNetCfuPipe = false
@@ -66,6 +67,7 @@ class MiCoSocParam {
     opt[Int]("bitnet-cfu-len") action { (v, c) => BitNetCfuLen = v }
     opt[Int]("bitnet-cfu-width") action { (v, c) => BitNetCfuWidth = v }
     opt[Int]("bitnet-cfu-bus-width") action { (v, c) => BitNetCfuBusWidth = v }
+    opt[Int]("bitnet-cfu-weight-banks") action { (v, c) => BitNetCfuWeightBanks = v }
     opt[String]("bitnet-cfu-qtype") action { (v, c) => BitNetCfuQType = v }
     opt[Unit]("bitnet-cfu-stress") action { (v, c) => BitNetCfuStress = true }
     opt[Unit]("bitnet-cfu-pipe") action { (v, c) => BitNetCfuPipe = true }

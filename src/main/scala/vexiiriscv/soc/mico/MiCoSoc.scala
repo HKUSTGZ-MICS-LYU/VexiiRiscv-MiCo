@@ -63,6 +63,7 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
       vlen = p.BitNetCfuLen,
       maclen = p.BitNetCfuWidth,
       xlen = p.BitNetCfuBusWidth,
+      weightBanks = p.BitNetCfuWeightBanks,
       qType = p.BitNetCfuQType,
       noWaitCompute = p.BitNetCfuStress,
       computePipe = p.BitNetCfuPipe)
