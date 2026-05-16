@@ -26,8 +26,9 @@ class MiCoSocParam {
   var BitNetCfuLen = 256
   var BitNetCfuWidth = 256
   var BitNetCfuBusWidth = 32
-  var BitNetCfuWeightBanks = 1
+  var BitNetCfuRegDepth = 2
   var BitNetCfuQType = "1.5b"
+  var BitNetCfuWithQ2 = false
   var BitNetCfuStress = false
   var BitNetCfuPipe = false
   var withL2Cache = false
@@ -67,8 +68,10 @@ class MiCoSocParam {
     opt[Int]("bitnet-cfu-len") action { (v, c) => BitNetCfuLen = v }
     opt[Int]("bitnet-cfu-width") action { (v, c) => BitNetCfuWidth = v }
     opt[Int]("bitnet-cfu-bus-width") action { (v, c) => BitNetCfuBusWidth = v }
-    opt[Int]("bitnet-cfu-weight-banks") action { (v, c) => BitNetCfuWeightBanks = v }
+    opt[Int]("bitnet-cfu-reg-depth") action { (v, c) => BitNetCfuRegDepth = v }
+    opt[Int]("bitnet-cfu-weight-banks") action { (v, c) => BitNetCfuRegDepth = v + 1 }
     opt[String]("bitnet-cfu-qtype") action { (v, c) => BitNetCfuQType = v }
+    opt[Unit]("bitnet-cfu-with-q2") action { (v, c) => BitNetCfuWithQ2 = true }
     opt[Unit]("bitnet-cfu-stress") action { (v, c) => BitNetCfuStress = true }
     opt[Unit]("bitnet-cfu-pipe") action { (v, c) => BitNetCfuPipe = true }
     opt[Unit]("l2-cache") action { (v, c) => withL2Cache = true; vexii.lsuL1Coherency = true}
