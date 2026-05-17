@@ -677,33 +677,24 @@ class MmuPlugin(var spec : MmuSpec,
         }
       } otherwise {
         assert(HART_COUNT.get == 1)
+        /* For addressed invalidation, each way only has at most one set will hit */
+        for (storage <- storages; sl <- storage.sl) {
+          val invalidateReadAddress = Mux(anyAddress, counter.resized, address(sl.lineRange))
+          val mask = B(sl.ways.map(way => {
+            val entry = way.readAsync(invalidateReadAddress)
+            asidHit(entry) && addressHit(entry) && guestHit(entry)
+          }))
+          sl.write.mask := mask
+          sl.write.address := invalidateReadAddress
+          sl.write.data.valid := False
+        }
         when (anyAddress) {
-          for (storage <- storages; sl <- storage.sl) {
-            val mask = B(sl.ways.map(way => {
-              val entry = way.readAsync(counter.resized)
-              asidHit(entry) && guestHit(entry)
-            }))
-            sl.write.mask := mask
-            sl.write.address := counter.resized
-            sl.write.data.valid := False
-          }
           counter := counter + 1
           when(counter.andR){
             busy := False
             arbiter.io.output.ready := True
           }
         } otherwise {
-          /* Optimize for each way only has at most one set will hit */
-          for (storage <- storages; sl <- storage.sl) {
-            val targetAddress = address(sl.lineRange)
-            val mask = B(sl.ways.map(way => {
-              val entry = way.readAsync(targetAddress)
-              asidHit(entry) && addressHit(entry) && guestHit(entry)
-            }))
-            sl.write.mask := mask
-            sl.write.address := targetAddress
-            sl.write.data.valid := False
-          }
           busy := False
           arbiter.io.output.ready := True
         }
