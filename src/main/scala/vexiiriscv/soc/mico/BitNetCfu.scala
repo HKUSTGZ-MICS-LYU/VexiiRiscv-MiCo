@@ -58,6 +58,45 @@ object BitNetCfuCompute extends AreaObject {
 
     Vec(partials.map(_.value)).reduceBalancedTree(_ +^ _).resize(resWidth)
   }
+
+  def BitNetQ2T(absmax: Bits, op: Bits, lanes: Int, resWidth: Int): Bits = {
+    val absmaxMagnitude = absmax(30 downto 0).asUInt
+    val absmaxExponent = absmax(30 downto 23).asUInt
+    val absmaxFraction = absmax(22 downto 0)
+    val absmaxIsValid = absmaxMagnitude =/= 0 && absmaxExponent =/= U(255, 8 bits)
+
+    val threshold = UInt(31 bits)
+    val normalHalfExponent = (absmaxExponent - 1).asBits
+    val minNormalHalfFraction = ((B"1'b1" ## absmaxFraction).asUInt |>> 1).asBits.resize(23)
+    val subnormalHalfFraction = (absmaxFraction.asUInt |>> 1).asBits.resize(23)
+
+    threshold := 0
+    when(absmaxExponent > U(1, 8 bits)) {
+      threshold := (normalHalfExponent ## absmaxFraction).asUInt
+    } elsewhen(absmaxExponent === U(1, 8 bits)) {
+      threshold := (B(0, 8 bits) ## minNormalHalfFraction).asUInt
+    } otherwise {
+      threshold := (B(0, 8 bits) ## subnormalHalfFraction).asUInt
+    }
+
+    val fp32 = op.subdivideIn(32 bits)
+    val packed = Bits(resWidth bits)
+    packed := 0
+
+    for(i <- 0 until lanes) {
+      val lane = fp32(i)
+      val magnitude = lane(30 downto 0).asUInt
+      val code = Bits(2 bits)
+
+      code := B"00"
+      when(absmaxIsValid && magnitude =/= 0 && magnitude >= threshold) {
+        code := lane(31).mux(B"11", B"01")
+      }
+      packed(2 * i, 2 bits) := code
+    }
+
+    packed
+  }
 }
 
 case class BitNetCfuParameter(
@@ -67,10 +106,13 @@ case class BitNetCfuParameter(
   var regDepth : Int = 2,
   var qType : String = "1.5b",
   var withQ2 : Boolean = false,
+  var withQ2T : Boolean = true,
+  var q2tWidth : Int = 0,
   var noWaitCompute : Boolean = false,
   var rfRam : Boolean = true,
   var computePipe : Boolean = false
 ) {
+  def q2tWidthEffective = if(q2tWidth == 0) vlen min 512 else q2tWidth
   def pendingSize = vlen / xlen
   def singleCycle = noWaitCompute && (vlen == maclen) && !computePipe
   def qTypeId = BitNetCfuCompute.qTypeId(qType)
@@ -85,12 +127,16 @@ class BitNetCfu(cfuParam: CfuBusParameter,
   val vlen = p.vlen
   val regDepth = p.regDepth
   val maclen = p.maclen
+  val q2tWidth = p.q2tWidthEffective
   val lanes = maclen / 8
+  val q2tLanes = q2tWidth / 32
+  val q2tResultLanes = vlen / 32
   val weightSliceBitsMax = lanes * 2
   val vlenLog2 = log2Up(vlen)
   val regSelWidth = log2Up(regDepth) max 1
   val nLoad = vlen / xlen
   val nCompute = vlen / maclen
+  val nQ2TCompute = vlen / q2tWidth
   val reslen = cfuParam.CFU_OUTPUT_DATA_W
 
   assert(RiscvBits.isPow2(vlen), "BitNetCfu vlen must be a power of two")
@@ -102,6 +148,13 @@ class BitNetCfu(cfuParam: CfuBusParameter,
   assert(weightSliceBitsMax <= vlen, "BitNetCfu weight slice must fit in one vector register")
   assert(regDepth >= 2, "BitNetCfu must have at least two vector registers")
   assert(p.withQ2 || p.qType != "2b", "BitNetCfu qType=2b requires --bitnet-cfu-with-q2")
+  if(p.withQ2T) {
+    assert(q2tWidth <= vlen, "BitNetCfu q2tWidth must fit in one vector register")
+    assert(vlen % q2tWidth == 0, "BitNetCfu vlen must be a multiple of q2tWidth")
+    assert(q2tWidth % 32 == 0, "BitNetCfu q2tWidth must hold complete FP32 lanes")
+    assert(q2tWidth <= 512, "BitNetCfu q2tWidth is capped by the 32-bit packed result")
+    assert(q2tResultLanes * 2 <= reslen, "BitNetCfu Q2T VLEN result must fit in the CFU response")
+  }
 
   val io = new Bundle {
     val bus = slave(CfuBus(cfuParam))
@@ -110,11 +163,13 @@ class BitNetCfu(cfuParam: CfuBusParameter,
 
   val func3 = io.bus.cmd.function_id.asBits
   // BNCFU custom0 ISA:
-  // func3=4: LOAD rs1=address, rs2=vector register
+  // func3=4: LOAD rs1=address value, rs2=vector register index encoded in raw instruction
+  // func3=3: Q2T rd=ternary_quant(absmax_bits=rs1 value, fp32_reg=rs2 raw index)
   // func3=2: CONFIG/RESET
-  // func3=1: BDOT rd=dot(int8_reg=rs1, lowbit_reg=rs2), advance low-bit cursor
+  // func3=1: BDOT rd=dot(int8_reg=rs1 raw index, lowbit_reg=rs2 raw index), advance low-bit cursor
   // func3=0: BDOT_HOLD, same operands/result, keep low-bit cursor for operand reuse
   val isLoad   = func3 === B"100"
+  val isQ2T    = if(p.withQ2T) func3 === B"011" else False
   val isConfig = func3 === B"010"
   val isBDot   = func3 === B"001"
   val isBDotHold = func3 === B"000"
@@ -166,13 +221,8 @@ class BitNetCfu(cfuParam: CfuBusParameter,
   if(cfuParam.CFU_WITH_STATUS) io.bus.rsp.status := B"000"
 
   val decode = new Area {
-    val AREG = UInt(regSelWidth bits)
-    val WREG = UInt(regSelWidth bits)
-    val LREG = UInt(regSelWidth bits)
-
-    AREG := io.bus.cmd.inputs(0).asUInt.resize(regSelWidth)
-    WREG := io.bus.cmd.inputs(1).asUInt.resize(regSelWidth)
-    LREG := io.bus.cmd.inputs(1).asUInt.resize(regSelWidth)
+    val RS1 = io.bus.cmd.raw_insn(19 downto 15).asUInt.resize(regSelWidth)
+    val RS2 = io.bus.cmd.raw_insn(24 downto 20).asUInt.resize(regSelWidth)
   }
 
   val loadRD = Reg(UInt(regSelWidth bits)) init(0)
@@ -189,26 +239,36 @@ class BitNetCfu(cfuParam: CfuBusParameter,
   }
 
   val rfRead = new Area {
-    val AREG = Reg(UInt(regSelWidth bits)) init(0)
-    val WREG = Reg(UInt(regSelWidth bits)) init(1)
+    val RS1 = Reg(UInt(regSelWidth bits)) init(0)
+    val RS2 = Reg(UInt(regSelWidth bits)) init(1)
     val ADVANCE = Reg(Bool()) init(True)
     val lowbitCursor = Reg(UInt(vlenLog2 bits)) init(0)
 
     when(io.bus.cmd.fire && isDot) {
-      AREG := decode.AREG
-      WREG := decode.WREG
+      RS1 := decode.RS1
+      RS2 := decode.RS2
       ADVANCE := isBDot
-      lowbitCursor := vecOffsets(decode.WREG)
+      lowbitCursor := vecOffsets(decode.RS2)
     }
 
     val useCmd = p.noWaitCompute.mux(io.bus.cmd.fire && isDot, False)
-    val aReg = useCmd.mux(decode.AREG, AREG)
-    val wReg = useCmd.mux(decode.WREG, WREG)
+    val rs1 = useCmd.mux(decode.RS1, RS1)
+    val rs2 = useCmd.mux(decode.RS2, RS2)
     val advanceLowbit = useCmd.mux(isBDot, ADVANCE)
-    val int8 = vecRead(aReg)
-    val lowbit = vecRead(wReg)
-    val int8Offset = vecOffsets(aReg)
-    val lowbitOffset = useCmd.mux(vecOffsets(decode.WREG), lowbitCursor)
+    val int8 = vecRead(rs1)
+    val lowbit = vecRead(rs2)
+    val int8Offset = vecOffsets(rs1)
+    val lowbitOffset = useCmd.mux(vecOffsets(decode.RS2), lowbitCursor)
+  }
+
+  val q2tRead = p.withQ2T generate new Area {
+    val ABSMAX = Reg(Bits(32 bits)) init(0)
+    val RS2 = Reg(UInt(regSelWidth bits)) init(0)
+
+    when(io.bus.cmd.fire && isQ2T) {
+      ABSMAX := io.bus.cmd.inputs(0).asBits.resize(32)
+      RS2 := decode.RS2
+    }
   }
 
   val compute = new Area {
@@ -233,7 +293,7 @@ class BitNetCfu(cfuParam: CfuBusParameter,
     val shiftInt8 = sel && !doneNow
     val shiftLowbitCursor = sel && !doneNow
     when(shiftInt8) {
-      if(nCompute != 1) vecOffsets(rfRead.aReg) := rfRead.int8Offset + U(maclen, vlenLog2 bits)
+      if(nCompute != 1) vecOffsets(rfRead.rs1) := rfRead.int8Offset + U(maclen, vlenLog2 bits)
     }
     when(shiftLowbitCursor) {
       rfRead.lowbitCursor := rfRead.lowbitOffset + config.weightInc
@@ -261,6 +321,66 @@ class BitNetCfu(cfuParam: CfuBusParameter,
     }
 
     val res = dot.res
+    val done = computeStage(DONE)
+
+    if(usePipe) {
+      val links = for(i <- 0 until nStages) yield StageLink(stages(i), stages(i + 1))
+      Builder(links)
+    }
+  }
+
+  val q2t = p.withQ2T generate new Area {
+    val offset = Reg(UInt(vlenLog2 bits)) init(0)
+    val acc = Reg(Bits(reslen bits)) init(0)
+    val sel = Bool()
+    val doneNow = (if(nQ2TCompute == 1) True else offset === U(vlen - q2tWidth, vlenLog2 bits)) && sel
+
+    sel := False
+
+    when(io.bus.cmd.fire && isQ2T) {
+      offset := 0
+      acc := 0
+    }
+
+    val usePipe = p.computePipe
+    val nStages = if(usePipe) 1 else 0
+    val stages = Array.fill(nStages + 1)(Node())
+    val extractStage = stages(0)
+    val computeStage = stages(nStages)
+
+    val SEL = Payload(Bool())
+    val DONE = Payload(Bool())
+    val ABS = Payload(Bits(32 bits))
+    val OP = Payload(Bits(q2tWidth bits))
+    val OFFSET = Payload(UInt(vlenLog2 bits))
+
+    val shiftOffset = sel && !doneNow
+    when(shiftOffset) {
+      if(nQ2TCompute != 1) offset := offset + U(q2tWidth, vlenLog2 bits)
+    }
+
+    val extract = new extractStage.Area {
+      ABS := q2tRead.ABSMAX
+      OP := vecRead(q2tRead.RS2)(offset, q2tWidth bits)
+      OFFSET := offset
+      SEL := sel
+      DONE := doneNow
+    }
+
+    val quant = new computeStage.Area {
+      val partial = BitNetQ2T(ABS, OP, q2tLanes, reslen)
+      val shift = (OFFSET |>> 4).resize(log2Up(reslen + 1))
+      val shifted = (partial.asUInt |<< shift).asBits.resize(reslen)
+      val packed = acc | shifted
+
+      when(SEL) {
+        if(nQ2TCompute != 1) acc := packed
+      } otherwise {
+        acc := 0
+      }
+    }
+
+    val result = quant.packed
     val done = computeStage(DONE)
 
     if(usePipe) {
@@ -298,6 +418,7 @@ class BitNetCfu(cfuParam: CfuBusParameter,
     val IDLE = new State with EntryPoint
     val LOAD = new State
     val BDOTP = new State
+    val Q2TP = p.withQ2T generate new State
 
     IDLE.whenIsActive {
       when(io.bus.cmd.fire) {
@@ -310,9 +431,9 @@ class BitNetCfu(cfuParam: CfuBusParameter,
             if(p.singleCycle) {
               io.bus.rsp.valid := True
               io.bus.rsp.outputs(0) := compute.res.asBits
-              vecOffsets(rfRead.aReg) := U(0, vlenLog2 bits)
+              vecOffsets(rfRead.rs1) := U(0, vlenLog2 bits)
               when(rfRead.advanceLowbit) {
-                vecOffsets(rfRead.wReg) := rfRead.lowbitOffset + config.weightInc
+                vecOffsets(rfRead.rs2) := rfRead.lowbitOffset + config.weightInc
               }
               compute.acc := 0
             } else {
@@ -328,6 +449,22 @@ class BitNetCfu(cfuParam: CfuBusParameter,
           rfRead.lowbitCursor := U(0, vlenLog2 bits)
           compute.acc := 0
         }
+        if(p.withQ2T) {
+          when(isQ2T) {
+            goto(Q2TP)
+          }
+        }
+      }
+    }
+
+    if(p.withQ2T) {
+      Q2TP.whenIsActive {
+        q2t.sel := (if(p.computePipe) !q2t.done else True)
+        when(q2t.done) {
+          io.bus.rsp.valid := True
+          io.bus.rsp.outputs(0) := q2t.result
+          goto(IDLE)
+        }
       }
     }
 
@@ -336,9 +473,9 @@ class BitNetCfu(cfuParam: CfuBusParameter,
       when(compute.done) {
         io.bus.rsp.valid := True
         io.bus.rsp.outputs(0) := compute.res.asBits
-        vecOffsets(rfRead.aReg) := U(0, vlenLog2 bits)
+        vecOffsets(rfRead.rs1) := U(0, vlenLog2 bits)
         when(rfRead.advanceLowbit) {
-          vecOffsets(rfRead.wReg) := rfRead.lowbitOffset + config.weightInc
+          vecOffsets(rfRead.rs2) := rfRead.lowbitOffset + config.weightInc
         }
         compute.acc := 0
         goto(IDLE)
@@ -347,13 +484,13 @@ class BitNetCfu(cfuParam: CfuBusParameter,
 
     LOAD.onEntry {
       baseAddr := io.bus.cmd.inputs(0).asUInt.resized
-      loadRD := decode.LREG
+      loadRD := decode.RS2
       offsetAddr := 0
       memFireId := 0
       memValid := True
       memReady := True
       loadVecHits.foreach(_ := False)
-      vecOffsets(decode.LREG) := U(0, vlenLog2 bits)
+      vecOffsets(decode.RS2) := U(0, vlenLog2 bits)
     }
 
     LOAD.whenIsActive {

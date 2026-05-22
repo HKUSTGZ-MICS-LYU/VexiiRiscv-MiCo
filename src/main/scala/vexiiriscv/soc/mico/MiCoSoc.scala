@@ -66,6 +66,8 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
       regDepth = p.BitNetCfuRegDepth,
       qType = p.BitNetCfuQType,
       withQ2 = p.BitNetCfuWithQ2,
+      withQ2T = p.BitNetCfuWithQ2T,
+      q2tWidth = p.BitNetCfuQ2TWidth,
       noWaitCompute = p.BitNetCfuStress,
       computePipe = p.BitNetCfuPipe)
 
