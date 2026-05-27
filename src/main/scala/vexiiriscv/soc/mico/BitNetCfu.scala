@@ -59,7 +59,7 @@ object BitNetCfuCompute extends AreaObject {
     Vec(partials.map(_.value)).reduceBalancedTree(_ +^ _).resize(resWidth)
   }
 
-  def BitNetQ2T(absmax: Bits, op: Bits, lanes: Int, resWidth: Int): Bits = {
+  def BitNetQ2TFast(absmax: Bits, op: Bits, lanes: Int, resWidth: Int): Bits = {
     val absmaxMagnitude = absmax(30 downto 0).asUInt
     val absmaxExponent = absmax(30 downto 23).asUInt
     val absmaxFraction = absmax(22 downto 0)
@@ -96,6 +96,97 @@ object BitNetCfuCompute extends AreaObject {
     }
 
     packed
+  }
+
+  def fp32MagnitudeParts(magnitude: UInt) = new Area {
+    val exponent = magnitude(30 downto 23)
+    val fraction = magnitude(22 downto 0)
+    val effectiveExponent = exponent.mux(
+      U(0, 8 bits) -> U(1, 8 bits),
+      default -> exponent
+    )
+    val significand = exponent.mux(
+      U(0, 8 bits) -> (B"1'b0" ## fraction).asUInt,
+      default -> (B"1'b1" ## fraction).asUInt
+    )
+  }
+
+  def fp32ScaledGte(aExponent: UInt, aProduct: UInt, bExponent: UInt, bProduct: UInt): Bool = {
+    val productWidth = aProduct.getWidth max bProduct.getWidth
+    val productWideWidth = productWidth * 2
+    val expDiffWidth = 9
+    val shiftWidth = log2Up(productWideWidth)
+    val aExpGte = aExponent >= bExponent
+    val expDiff = aExpGte.mux(
+      (aExponent.resize(expDiffWidth) - bExponent.resize(expDiffWidth)).resize(expDiffWidth),
+      (bExponent.resize(expDiffWidth) - aExponent.resize(expDiffWidth)).resize(expDiffWidth)
+    )
+    val expDiffLarge = expDiff >= U(productWidth, expDiffWidth bits)
+    val aWide = aProduct.resize(productWideWidth)
+    val bWide = bProduct.resize(productWideWidth)
+    val shiftInput = aExpGte.mux(aWide, bWide)
+    val shiftedProduct = (shiftInput |<< expDiff.resize(shiftWidth)).resize(productWideWidth)
+    val result = Bool()
+
+    result := !expDiffLarge && aWide >= shiftedProduct
+    when(aExpGte) {
+      result := expDiffLarge || shiftedProduct >= bWide
+    }
+
+    result
+  }
+
+  def BitNetQ(absmax: Bits, op: Bits, lanes: Int, intN: Int, symmetric: Boolean, resWidth: Int): Bits = {
+    require(intN >= 2 && intN <= 8, "BitNetQ supports signed INT2..INT8 quantization")
+    require(lanes * intN <= resWidth, "BitNetQ packed result must fit in resWidth")
+
+    val absmaxMagnitude = absmax(30 downto 0).asUInt
+    val absmaxExponent = absmax(30 downto 23).asUInt
+    val absmaxIsValid = absmaxMagnitude =/= 0 && absmaxExponent =/= U(255, 8 bits)
+    val qMaxPositive = (1 << (intN - 1)) - 1
+    val qMaxNegative = if(symmetric) qMaxPositive else 1 << (intN - 1)
+    val qMaxMagnitude = qMaxPositive max qMaxNegative
+    val qScaleWidth = log2Up((qMaxMagnitude << 1) + 1) max 1
+    val thresholdMulWidth = log2Up(qMaxMagnitude << 1) max 1
+    val productWidth = 24 + (qScaleWidth max thresholdMulWidth)
+    val absmaxParts = fp32MagnitudeParts(absmaxMagnitude)
+    val thresholdProducts = for(value <- 1 to qMaxMagnitude) yield {
+      (absmaxParts.significand * U((value << 1) - 1, thresholdMulWidth bits)).resize(productWidth)
+    }
+
+    val fp32 = op.subdivideIn(32 bits)
+    val packed = Bits(resWidth bits)
+    packed := 0
+
+    for(i <- 0 until lanes) {
+      val lane = fp32(i)
+      val magnitude = lane(30 downto 0).asUInt
+      val laneParts = fp32MagnitudeParts(magnitude)
+      val qMax = UInt(intN bits)
+      val qScale = UInt(qScaleWidth bits)
+      val scaledMagnitude = UInt(productWidth bits)
+      val level = UInt(intN bits)
+      val code = Bits(intN bits)
+
+      qMax := lane(31).mux(U(qMaxNegative, intN bits), U(qMaxPositive, intN bits))
+      qScale := (qMax.resize(qScaleWidth) |<< 1).resize(qScaleWidth)
+      scaledMagnitude := (laneParts.significand * qScale).resize(productWidth)
+
+      level := 0
+      for(value <- 1 to qMaxMagnitude) {
+        when(absmaxIsValid && magnitude =/= 0 && U(value, intN bits) <= qMax &&
+             fp32ScaledGte(laneParts.effectiveExponent, scaledMagnitude, absmaxParts.effectiveExponent, thresholdProducts(value - 1))) {
+          level := U(value, intN bits)
+        }
+      }
+      code := lane(31).mux((U(0, intN bits) - level).asBits, level.asBits)
+      packed(intN * i, intN bits) := code
+    }
+    packed
+  }
+
+  def BitNetQ2T(absmax: Bits, op: Bits, lanes: Int, resWidth: Int): Bits = {
+    BitNetQ2TFast(absmax, op, lanes, resWidth)
   }
 }
 
@@ -221,6 +312,8 @@ class BitNetCfu(cfuParam: CfuBusParameter,
   if(cfuParam.CFU_WITH_STATUS) io.bus.rsp.status := B"000"
 
   val decode = new Area {
+    val RS1_RAW = io.bus.cmd.raw_insn(19 downto 15).asUInt
+    val RS2_RAW = io.bus.cmd.raw_insn(24 downto 20).asUInt
     val RS1 = io.bus.cmd.raw_insn(19 downto 15).asUInt.resize(regSelWidth)
     val RS2 = io.bus.cmd.raw_insn(24 downto 20).asUInt.resize(regSelWidth)
   }
@@ -229,7 +322,9 @@ class BitNetCfu(cfuParam: CfuBusParameter,
   val vecOffsets = Vec(Reg(UInt(vlenLog2 bits)) init(0), regDepth)
 
   val config = new Area {
-    val qType = U(p.qTypeId, 2 bits)
+    val qType = Reg(UInt(2 bits)) init(U(p.qTypeId, 2 bits))
+    val qTypeCmd = decode.RS1_RAW.resize(2)
+    val qTypeValid = qTypeCmd === U(Q1B, 2 bits) || qTypeCmd === U(Q2B, 2 bits) || qTypeCmd === U(Q15B, 2 bits)
     val weightInc = UInt(vlenLog2 bits)
 
     weightInc := qType.mux(
@@ -445,6 +540,11 @@ class BitNetCfu(cfuParam: CfuBusParameter,
         }
         when(isConfig) {
           io.bus.rsp.valid := True
+          when(config.qTypeValid) {
+            config.qType := config.qTypeCmd
+          } otherwise {
+            config.qType := U(p.qTypeId, 2 bits)
+          }
           vecOffsets.foreach(_ := U(0, vlenLog2 bits))
           rfRead.lowbitCursor := U(0, vlenLog2 bits)
           compute.acc := 0
