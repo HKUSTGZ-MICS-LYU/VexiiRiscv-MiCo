@@ -101,7 +101,7 @@ object ParamSimple{
  */
 class ParamSimple() {
   var xlen = 32
-  var withISA = Set[String]("i", "zicsr", "zifencei")
+  var extension = ExtensionManager(Set("zicsr", "zifencei"))
   var withAlignerBuffer = false
   var withDispatcherBuffer = false
   var hartCount = 1
@@ -557,9 +557,9 @@ class ParamSimple() {
     Math.abs(md.toString.hashCode())
   }
 
-  def addISA(exts: String*): Unit = withISA ++= exts.map(_.toLowerCase())
-  def removeISA(exts: String*): Unit = withISA --= exts.map(_.toLowerCase())
-  def checkISA(exts: String*) = exts.map(withISA contains _.toLowerCase()).reduce(_ && _)
+  def addISA(exts: String*): Unit = extension.add(exts :_*)
+  def removeISA(exts: String*): Unit = extension.remove(exts :_*)
+  def checkISA(exts: String*) = extension.check(exts :_*)
 
   def withRve = checkISA("e")
   def withRva = checkISA("a")
@@ -594,22 +594,9 @@ class ParamSimple() {
   def withSsaia = checkISA("ssaia")
 
   def fixIsaParams() = {
-    if(checkISA("h")) addISA("s")
-    if(checkISA("s")) addISA("u")
-
-    if(checkISA("g")) addISA("i", "m", "a", "f", "d", "s", "u")
-    if(checkISA("b")) {
-      addISA("zba", "zbb", "zbs")
-      removeISA("b")
-    }
-
     if(privParam.imsicInterrupts > 0) addISA("smaia", "ssaia")
-    if(withSxaia) addISA("smcsrind", "sscsrind")
-
-    if(!checkISA("s")) {
-      removeISA("sscsrind", "ssaia", "sstc")
-    }
-    if(checkISA("zihpm") || withSstc) addISA("zicntr")
+    extension.finialize()
+    println(s"ISA extensions: ${extension.getIsaNameArray().mkString(", ")}")
 
     if(withSupervisor) privParam.withSupervisor = true
     if(withHypervisor) privParam.withHypervisor = true
@@ -623,21 +610,7 @@ class ParamSimple() {
   // Generate a human readable name from most of the supported configuration
   def getName() : String = {
     def opt(that : Boolean, v : String) = that.mux(v, "")
-    var isa = s"rv${xlen}"
-    if (withRve) isa += "e" else isa += "i"
-    if (withMul) isa += s"m"
-    if (withRva) isa += "a"
-    if (withRvf) isa += "f"
-    if (withRvd) isa += "d"
-    if (withRvh) isa += "h"
-    if (withRvc) isa += "c"
-    if (withRvZba) isa += "Zba"
-    if (withRvZbb) isa += "Zbb"
-    if (withRvZbc) isa += "Zbc"
-    if (withRvZbs) isa += "Zbs"
-    if (withIndirectCsr) isa += "Smcsrind" + privParam.withSupervisor.mux("Sscsrind", "")
-    if (privParam.withSupervisor) isa += "s"
-    if (privParam.withUser) isa += "u"
+    val isa = s"rv${xlen}${extension.getIsaStr()}"
     val r = new ArrayBuffer[String]()
     r += isa
     r += s"d${decoders}At${decoderAt}"
@@ -700,7 +673,7 @@ class ParamSimple() {
     opt[Seq[String]]("with-isa").unbounded() action { (v, c) => addISA(v: _*) }
     opt[Seq[String]]("without-isa").unbounded() action { (v, c) => removeISA(v: _*) }
     opt[Unit]("with-rvm") action { (v, c) => addISA("m") }
-    opt[Unit]("with-rve") action { (v, c) => addISA("e"); removeISA("i") }
+    opt[Unit]("with-rve") action { (v, c) => addISA("e") }
     opt[Unit]("with-rva") action { (v, c) => addISA("a") }
     opt[Unit]("with-rvf") action { (v, c) => addISA("f") }
     opt[Unit]("with-rvd") action { (v, c) => addISA("f", "d") }
@@ -851,7 +824,7 @@ class ParamSimple() {
 
     val intWritebackAt = 2 + withRvh.toInt //Alias for "trap at" as well
 
-    plugins += new riscv.RiscvPlugin(xlen, hartCount, isa = withISA.toSet)
+    plugins += new riscv.RiscvPlugin(xlen, hartCount, isa = extension.getIsaNameArray(includeIgnored = true).toSet)
     if (withMmu) plugins += new TranslatedDBusAccessPlugin()
     withMmu match {
       case false => plugins += new vexiiriscv.memory.StaticTranslationPlugin(physicalWidth)

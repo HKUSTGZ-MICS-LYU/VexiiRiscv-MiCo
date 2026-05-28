@@ -15,7 +15,7 @@ import vexiiriscv.misc.{PerformanceCounterPlugin, PrivilegedPlugin}
 import vexiiriscv.riscv.FloatRegFile
 //import vexiiriscv.execute.LsuCachelessPlugin
 import vexiiriscv.fetch.Fetch
-import vexiiriscv.riscv.{IntRegFile, Riscv}
+import vexiiriscv.riscv.{IntRegFile, Riscv, RiscvPlugin}
 import vexiiriscv.test.konata.{Comment, Flush, Retire, Spawn, Stage}
 
 import scala.collection.mutable
@@ -210,20 +210,8 @@ class VexiiRiscvProbe(cpu : VexiiRiscv, kb : Option[konata.Backend], var withRvl
           case Some(x) => "M" + x.p.withSupervisor.mux("S", "") + x.p.withUser.mux("U", "")
           case None => "M"
         }
-        var isa = s"RV${xlen}I"
-        if (get(Riscv.RVM)) isa += "M"
-        if (get(Riscv.RVA)) isa += "A"
-        if (get(Riscv.RVF)) isa += "F"
-        if (get(Riscv.RVD)) isa += "D"
-        if (get(Riscv.RVC)) isa += "C"
-        if (get(Riscv.RVH)) isa += "H"
-        if (get(Riscv.RVZba)) isa += "_zba"
-        if (get(Riscv.RVZbb)) isa += "_zbb"
-        if (get(Riscv.RVZbc)) isa += "_zbc"
-        if (get(Riscv.RVZbs)) isa += "_zbs"
-        if (get(Riscv.RVZcbm)) isa += "_zicbom"
-        if (cpu.host.get[PrivilegedPlugin].exists(_.p.withRdTime)) isa += "_zicntr"
-        if (cpu.host.get[PerformanceCounterPlugin].nonEmpty) isa += "_zihpm"
+        val riscvPlugin = cpu.host[RiscvPlugin]
+        val isa = s"RV${xlen}${ExtensionManager.getIsaStr(riscvPlugin.isa)}"
         tracer.newCpuMemoryView(hartId, 16, 1 << Decode.STORE_ID_WIDTH)
         tracer.newCpu(
           hartId = hartId,
