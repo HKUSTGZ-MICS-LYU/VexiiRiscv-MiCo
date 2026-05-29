@@ -18,6 +18,7 @@ import scala.collection.mutable.ArrayBuffer
  */
 class PerformanceCounterPlugin(var additionalCounterCount : Int,
                                var bufferWidth : Int = 8,
+                               var withSmcntrpmf : Boolean = true,
                                var withScountovf : Boolean = true) extends FiberPlugin with PerformanceCounterService{
   def counterCount = 2 + additionalCounterCount
 
@@ -110,7 +111,7 @@ class PerformanceCounterPlugin(var additionalCounterCount : Int,
       cycle.value := cycle.value + (!cycle.mcountinhibit).asUInt
       instret.value := instret.value + RegNext(commitCount.andMask(!instret.mcountinhibit)).init(0)
 
-      Riscv.XLEN.get match {
+      if (withSmcntrpmf) Riscv.XLEN.get match {
         case 32 => {
           cycle.mappingCfgCsr(CSR.MCYCLECFGH, 32)
           instret.mappingCfgCsr(CSR.MINSTRETCFGH, 32)
