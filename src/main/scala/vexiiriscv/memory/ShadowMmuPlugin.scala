@@ -125,8 +125,15 @@ class ShadowMmuPlugin(var spec : MmuSpec,
       val read = for (sl <- storage.sl) yield new Area {
         val readAddress = readStage(ps.req.PRE_ADDRESS)(sl.lineRange)
         for ((way, wayId) <- sl.ways.zipWithIndex) {
+          /* The shadow MMU should not enable the "ASID" and "GUEST" field of TLB */
+          val query = MmuTlbStorageEntryQuery(
+            address = hitsStage(ps.req.PRE_ADDRESS),
+            asid    = B(0),
+            guest   = False
+          )
+
           readStage(sl.keys.ENTRIES)(wayId) := way.readAsync(readAddress)
-          hitsStage(sl.keys.HITS_PRE_VALID)(wayId) := hitsStage(sl.keys.ENTRIES)(wayId).hit(hitsStage(ps.req.PRE_ADDRESS))
+          hitsStage(sl.keys.HITS_PRE_VALID)(wayId) := hitsStage(sl.keys.ENTRIES)(wayId).hit(query)
           ctrlStage(sl.keys.HITS)(wayId) := ctrlStage(sl.keys.HITS_PRE_VALID)(wayId) && ctrlStage(sl.keys.ENTRIES)(wayId).valid
         }
       }

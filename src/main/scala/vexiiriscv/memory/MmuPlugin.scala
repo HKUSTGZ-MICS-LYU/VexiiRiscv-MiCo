@@ -86,6 +86,12 @@ case class MmuTlbStorageEntryParam(
   checkGuest: Boolean
 )
 
+case class MmuTlbStorageEntryQuery(
+  address: UInt,
+  asid: Bits,
+  guest: Bool
+)
+
 class MmuTlbStorageEntry(
   spec : MmuSpec,
   physicalWidth : Int,
@@ -105,6 +111,18 @@ class MmuTlbStorageEntry(
   val guest = p.checkGuest generate Bool()
 
   def hit(address : UInt) = /*valid && */virtualAddress === address(spec.levels(levelId).virtualOffset + log2Up(depth), vw - log2Up(depth) bits)
+  def hit(query : MmuTlbStorageEntryQuery): Bool = {
+    val addressCheck = hit(query.address)
+    val asidCheck = (p.asidWidth > 0).mux(asid === query.asid, True)
+    val guestCheck = p.checkGuest.mux(guest === query.guest, True)
+    addressCheck && asidCheck && guestCheck
+  }
+  def needFlush(query : MmuTlbStorageEntryQuery, anyAsid : Bool, anyAddress : Bool) = {
+    val addressCheck = hit(query.address) || anyAddress
+    val asidCheck = (p.asidWidth > 0).mux(asid === query.asid, True) || anyAsid
+    val guestCheck = p.checkGuest.mux(guest === query.guest, True)
+    addressCheck && asidCheck && guestCheck
+  }
   def physicalAddressFrom(address : UInt) = physicalAddress @@ address(0, spec.levels(levelId).physicalOffset bits)
 }
 
@@ -346,15 +364,19 @@ class MmuPlugin(var spec : MmuSpec,
       val storage = storages.find(_.self == ps.ss).get
       val read = for (sl <- storage.sl) yield new Area {
         val readAddress = readStage(ps.req.PRE_ADDRESS)(sl.lineRange)
-        val forceGuest = ctrlStage(ps.req.FORCE_GUEST) || effectiveGuest
+        val forceGuest = hitsStage(ps.req.FORCE_GUEST) || effectiveGuest
         val currentAsid = priv.implementHypervisor.mux(Mux(forceGuest, vsatp.asid, satp.asid), satp.asid)
         for ((way, wayId) <- sl.ways.zipWithIndex) {
+          val query = MmuTlbStorageEntryQuery(
+            address = hitsStage(ps.req.PRE_ADDRESS),
+            asid    = currentAsid,
+            guest   = priv.implementHypervisor.mux(forceGuest, True)
+          )
+
           readStage(sl.keys.ENTRIES)(wayId) := way.readAsync(readAddress)
-          hitsStage(sl.keys.HITS_PRE_VALID)(wayId) := hitsStage(sl.keys.ENTRIES)(wayId).hit(hitsStage(ps.req.PRE_ADDRESS))
+          hitsStage(sl.keys.HITS_PRE_VALID)(wayId) := hitsStage(sl.keys.ENTRIES)(wayId).hit(query)
           ctrlStage(sl.keys.HITS)(wayId) := ctrlStage(sl.keys.HITS_PRE_VALID)(wayId) &&
-            ctrlStage(sl.keys.ENTRIES)(wayId).valid &&
-            (asidWidth > 0).mux(ctrlStage(sl.keys.ENTRIES)(wayId).asid === currentAsid, True) &&
-            priv.implementHypervisor.mux(ctrlStage(sl.keys.ENTRIES)(wayId).guest === forceGuest, True)
+            ctrlStage(sl.keys.ENTRIES)(wayId).valid
         }
       }
 
@@ -658,10 +680,11 @@ class MmuPlugin(var spec : MmuSpec,
 
       val anyAsid = (asidWidth > 0).mux(asid === 0, True)
       val anyAddress = address === 0
-
-      def asidHit(entry: MmuTlbStorageEntry) = (asidWidth > 0).mux(anyAsid || entry.asid === asid, True)
-      def addressHit(entry: MmuTlbStorageEntry) = anyAddress || entry.hit(address)
-      def guestHit(entry: MmuTlbStorageEntry) = withGuestSfenceCheck.mux(both || entry.guest === guest, True)
+      val query = MmuTlbStorageEntryQuery(
+        address = address,
+        asid    = asid,
+        guest   = withGuestSfenceCheck.mux(guest, False)
+      )
 
       arbiter.io.output.ready := False
       when(!busy){
@@ -682,7 +705,7 @@ class MmuPlugin(var spec : MmuSpec,
           val invalidateReadAddress = Mux(anyAddress, counter.resized, address(sl.lineRange))
           val mask = B(sl.ways.map(way => {
             val entry = way.readAsync(invalidateReadAddress)
-            asidHit(entry) && addressHit(entry) && guestHit(entry)
+            entry.needFlush(query, anyAsid, anyAddress) || both
           }))
           sl.write.mask := mask
           sl.write.address := invalidateReadAddress
