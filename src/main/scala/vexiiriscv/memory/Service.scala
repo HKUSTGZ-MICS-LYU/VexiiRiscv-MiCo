@@ -83,10 +83,15 @@ case class AddressTranslationInvalidationParam(
 )
 
 case class AddressTranslationInvalidationCmd(p: AddressTranslationInvalidationParam) extends Bundle {
+  def withAnyAsid = p.asidWidth > 0
+  def withAnyAddress = p.requestAddress
+
   val hartId = HART_ID()
   val asid = Bits(p.asidWidth bits)
   val address = p.requestAddress generate MIXED_ADDRESS()
   val guest = p.requestGuest generate Bool()
+  val anyAddress = p.requestAddress generate Bool()
+  val anyAsid = withAnyAsid generate Bool()
   /* For reset */
   val force = Bool()
 }

@@ -5,7 +5,7 @@ import spinal.lib._
 import spinal.lib.misc.plugin.FiberPlugin
 import spinal.lib.misc.pipeline._
 import vexiiriscv.misc.{PrivilegedPlugin, TrapReason, TrapService}
-import vexiiriscv.riscv.{CSR, PrivilegeMode, Rvi, Rvh}
+import vexiiriscv.riscv.{Const, CSR, PrivilegeMode, Rvi, Rvh}
 import vexiiriscv._
 import vexiiriscv.Global._
 import vexiiriscv.decode.Decode
@@ -170,6 +170,8 @@ class EnvPlugin(layer : LaneLayer,
               trapPort.tval := srcp.SRC1.asBits.resized
               trapPort.tval2 := srcp.SRC2.asBits.resized
               trapPort.arg(0) := isGuest
+              trapPort.arg(1) := Decode.UOP(Const.rs1Range) === 0
+              trapPort.arg(2) := Decode.UOP(Const.rs2Range) === 0
             }
             if(ps.p.withHypervisor) {
               when(privilege === PrivilegeMode.VU || privilege === PrivilegeMode.VS && vmaKoMapping(PrivilegeMode.VS)) {
@@ -199,6 +201,8 @@ class EnvPlugin(layer : LaneLayer,
               trapPort.tval := srcp.SRC1.asBits.resized
               trapPort.tval2 := srcp.SRC2.asBits.resized
               trapPort.arg(0) := True
+              trapPort.arg(1) := Decode.UOP(Const.rs1Range) === 0
+              trapPort.arg(2) := Decode.UOP(Const.rs2Range) === 0
             }
             when(PrivilegeMode.isGuest(privilege)) {
               trapPort.code := CSR.MCAUSE_ENUM.VIRTUAL_INSTRUCTION

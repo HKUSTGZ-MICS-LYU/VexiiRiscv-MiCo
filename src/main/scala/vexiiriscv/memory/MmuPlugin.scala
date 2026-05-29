@@ -688,8 +688,8 @@ class MmuPlugin(var spec : MmuSpec,
       val guest = withGuestSfenceCheck generate RegInit(False)
       val force = RegInit(False)
 
-      val anyAsid = (asidWidth > 0).mux(asid === 0, True) || force
-      val anyAddress = address === 0
+      val anyAsid = (asidWidth > 0).mux(RegInit(False), True)
+      val anyAddress = RegInit(False)
       val query = MmuTlbStorageEntryQuery(
         address = address,
         asid    = asid,
@@ -703,6 +703,8 @@ class MmuPlugin(var spec : MmuSpec,
           busy := True
           asid := arbiter.io.output.asid.resized
           address := arbiter.io.output.address.resized
+          anyAddress := arbiter.io.output.anyAddress || arbiter.io.output.force
+          if(asidWidth > 0) anyAsid := arbiter.io.output.anyAsid
           force := arbiter.io.output.force
           if (withGuestSfenceCheck) guest := arbiter.io.output.guest
         }
