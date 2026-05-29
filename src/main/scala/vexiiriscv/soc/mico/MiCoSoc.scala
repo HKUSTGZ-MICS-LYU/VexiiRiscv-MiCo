@@ -67,9 +67,11 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
       qType = p.BitNetCfuQType,
       withQ2 = p.BitNetCfuWithQ2,
       withQ2T = p.BitNetCfuWithQ2T,
-      q2tWidth = p.BitNetCfuQ2TWidth,
+      withQ8 = p.BitNetCfuWithQ8,
+      quantWidth = p.BitNetCfuQuantWidth,
       noWaitCompute = p.BitNetCfuStress,
-      computePipe = p.BitNetCfuPipe)
+      computePipe = p.BitNetCfuPipe,
+      q8ComparePipe = p.BitNetCfuQ8ComparePipe)
 
     val cfu = p.useMiCoVpu generate new TilelinkVpuCfuFiber(vpuParam, p.vexii.xlen) {
       mainBus << bus

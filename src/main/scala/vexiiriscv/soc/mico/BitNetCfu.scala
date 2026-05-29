@@ -111,6 +111,24 @@ object BitNetCfuCompute extends AreaObject {
     )
   }
 
+  def constMulUInt(value: UInt, constant: Int, width: Int): UInt = {
+    require(constant >= 0, "constMulUInt only supports non-negative constants")
+    val terms = for(bit <- 0 until log2Up(constant + 1) if ((constant >> bit) & 1) != 0) yield {
+      (value.resize(width) |<< bit).resize(width)
+    }
+    if(terms.isEmpty) U(0, width bits) else terms.reduce(_ +^ _).resize(width)
+  }
+
+  def shiftAddMulUInt(value: UInt, factor: UInt, width: Int): UInt = {
+    val terms = for(bit <- 0 until factor.getWidth) yield {
+      factor(bit).mux(
+        (value.resize(width) |<< bit).resize(width),
+        U(0, width bits)
+      )
+    }
+    terms.reduceBalancedTree(_ +^ _).resize(width)
+  }
+
   def fp32ScaledGte(aExponent: UInt, aProduct: UInt, bExponent: UInt, bProduct: UInt): Bool = {
     val productWidth = aProduct.getWidth max bProduct.getWidth
     val productWideWidth = productWidth * 2
@@ -136,57 +154,20 @@ object BitNetCfuCompute extends AreaObject {
     result
   }
 
-  def BitNetQ(absmax: Bits, op: Bits, lanes: Int, intN: Int, symmetric: Boolean, resWidth: Int): Bits = {
-    require(intN >= 2 && intN <= 8, "BitNetQ supports signed INT2..INT8 quantization")
-    require(lanes * intN <= resWidth, "BitNetQ packed result must fit in resWidth")
-
+  def BitNetQ8Keep(absmax: Bits, lane: Bits, trial: UInt): Bool = {
     val absmaxMagnitude = absmax(30 downto 0).asUInt
     val absmaxExponent = absmax(30 downto 23).asUInt
     val absmaxIsValid = absmaxMagnitude =/= 0 && absmaxExponent =/= U(255, 8 bits)
-    val qMaxPositive = (1 << (intN - 1)) - 1
-    val qMaxNegative = if(symmetric) qMaxPositive else 1 << (intN - 1)
-    val qMaxMagnitude = qMaxPositive max qMaxNegative
-    val qScaleWidth = log2Up((qMaxMagnitude << 1) + 1) max 1
-    val thresholdMulWidth = log2Up(qMaxMagnitude << 1) max 1
-    val productWidth = 24 + (qScaleWidth max thresholdMulWidth)
+    val productWidth = 32
     val absmaxParts = fp32MagnitudeParts(absmaxMagnitude)
-    val thresholdProducts = for(value <- 1 to qMaxMagnitude) yield {
-      (absmaxParts.significand * U((value << 1) - 1, thresholdMulWidth bits)).resize(productWidth)
-    }
+    val magnitude = lane(30 downto 0).asUInt
+    val laneParts = fp32MagnitudeParts(magnitude)
+    val scaledMagnitude = constMulUInt(laneParts.significand, 254, productWidth)
+    val thresholdFactor = ((trial.resize(9) |<< 1) - U(1, 9 bits)).resize(8)
+    val thresholdProduct = shiftAddMulUInt(absmaxParts.significand, thresholdFactor, productWidth)
 
-    val fp32 = op.subdivideIn(32 bits)
-    val packed = Bits(resWidth bits)
-    packed := 0
-
-    for(i <- 0 until lanes) {
-      val lane = fp32(i)
-      val magnitude = lane(30 downto 0).asUInt
-      val laneParts = fp32MagnitudeParts(magnitude)
-      val qMax = UInt(intN bits)
-      val qScale = UInt(qScaleWidth bits)
-      val scaledMagnitude = UInt(productWidth bits)
-      val level = UInt(intN bits)
-      val code = Bits(intN bits)
-
-      qMax := lane(31).mux(U(qMaxNegative, intN bits), U(qMaxPositive, intN bits))
-      qScale := (qMax.resize(qScaleWidth) |<< 1).resize(qScaleWidth)
-      scaledMagnitude := (laneParts.significand * qScale).resize(productWidth)
-
-      level := 0
-      for(value <- 1 to qMaxMagnitude) {
-        when(absmaxIsValid && magnitude =/= 0 && U(value, intN bits) <= qMax &&
-             fp32ScaledGte(laneParts.effectiveExponent, scaledMagnitude, absmaxParts.effectiveExponent, thresholdProducts(value - 1))) {
-          level := U(value, intN bits)
-        }
-      }
-      code := lane(31).mux((U(0, intN bits) - level).asBits, level.asBits)
-      packed(intN * i, intN bits) := code
-    }
-    packed
-  }
-
-  def BitNetQ2T(absmax: Bits, op: Bits, lanes: Int, resWidth: Int): Bits = {
-    BitNetQ2TFast(absmax, op, lanes, resWidth)
+    absmaxIsValid && magnitude =/= 0 &&
+      fp32ScaledGte(laneParts.effectiveExponent, scaledMagnitude, absmaxParts.effectiveExponent, thresholdProduct)
   }
 }
 
@@ -198,12 +179,14 @@ case class BitNetCfuParameter(
   var qType : String = "1.5b",
   var withQ2 : Boolean = false,
   var withQ2T : Boolean = true,
-  var q2tWidth : Int = 0,
+  var withQ8 : Boolean = false,
+  var quantWidth : Int = 0,
   var noWaitCompute : Boolean = false,
   var rfRam : Boolean = true,
-  var computePipe : Boolean = false
+  var computePipe : Boolean = false,
+  var q8ComparePipe : Boolean = false
 ) {
-  def q2tWidthEffective = if(q2tWidth == 0) vlen min 512 else q2tWidth
+  def quantWidthEffective = if(quantWidth == 0) vlen min 128 else quantWidth
   def pendingSize = vlen / xlen
   def singleCycle = noWaitCompute && (vlen == maclen) && !computePipe
   def qTypeId = BitNetCfuCompute.qTypeId(qType)
@@ -218,16 +201,16 @@ class BitNetCfu(cfuParam: CfuBusParameter,
   val vlen = p.vlen
   val regDepth = p.regDepth
   val maclen = p.maclen
-  val q2tWidth = p.q2tWidthEffective
+  val quantWidth = p.quantWidthEffective
   val lanes = maclen / 8
-  val q2tLanes = q2tWidth / 32
+  val quantLanes = quantWidth / 32
   val q2tResultLanes = vlen / 32
   val weightSliceBitsMax = lanes * 2
   val vlenLog2 = log2Up(vlen)
   val regSelWidth = log2Up(regDepth) max 1
   val nLoad = vlen / xlen
   val nCompute = vlen / maclen
-  val nQ2TCompute = vlen / q2tWidth
+  val quantChunks = vlen / quantWidth
   val reslen = cfuParam.CFU_OUTPUT_DATA_W
 
   assert(RiscvBits.isPow2(vlen), "BitNetCfu vlen must be a power of two")
@@ -239,12 +222,19 @@ class BitNetCfu(cfuParam: CfuBusParameter,
   assert(weightSliceBitsMax <= vlen, "BitNetCfu weight slice must fit in one vector register")
   assert(regDepth >= 2, "BitNetCfu must have at least two vector registers")
   assert(p.withQ2 || p.qType != "2b", "BitNetCfu qType=2b requires --bitnet-cfu-with-q2")
+  if(p.withQ2T || p.withQ8) {
+    assert(RiscvBits.isPow2(quantWidth), "BitNetCfu quantWidth must be a power of two")
+    assert(quantWidth <= vlen, "BitNetCfu quantWidth must fit in one vector register")
+    assert(vlen % quantWidth == 0, "BitNetCfu vlen must be a multiple of quantWidth")
+    assert(quantWidth % 32 == 0, "BitNetCfu quantWidth must hold complete FP32 lanes")
+    assert(quantWidth <= 128, "BitNetCfu quantWidth is capped by the 32-bit Q8 packed response")
+  }
   if(p.withQ2T) {
-    assert(q2tWidth <= vlen, "BitNetCfu q2tWidth must fit in one vector register")
-    assert(vlen % q2tWidth == 0, "BitNetCfu vlen must be a multiple of q2tWidth")
-    assert(q2tWidth % 32 == 0, "BitNetCfu q2tWidth must hold complete FP32 lanes")
-    assert(q2tWidth <= 512, "BitNetCfu q2tWidth is capped by the 32-bit packed result")
     assert(q2tResultLanes * 2 <= reslen, "BitNetCfu Q2T VLEN result must fit in the CFU response")
+  }
+  if(p.withQ8) {
+    assert(quantLanes * 8 <= reslen, "BitNetCfu Q8 result must fit in the CFU response")
+    assert(quantChunks <= 128, "BitNetCfu Q8 chunk index is encoded in func7")
   }
 
   val io = new Bundle {
@@ -254,11 +244,13 @@ class BitNetCfu(cfuParam: CfuBusParameter,
 
   val func3 = io.bus.cmd.function_id.asBits
   // BNCFU custom0 ISA:
+  // func3=5: Q8 rd=int8_quant(absmax_bits=rs1 value, fp32_reg=rs2 raw index, chunk=func7)
   // func3=4: LOAD rs1=address value, rs2=vector register index encoded in raw instruction
   // func3=3: Q2T rd=ternary_quant(absmax_bits=rs1 value, fp32_reg=rs2 raw index)
   // func3=2: CONFIG/RESET
   // func3=1: BDOT rd=dot(int8_reg=rs1 raw index, lowbit_reg=rs2 raw index), advance low-bit cursor
   // func3=0: BDOT_HOLD, same operands/result, keep low-bit cursor for operand reuse
+  val isQ8     = if(p.withQ8) func3 === B"101" else False
   val isLoad   = func3 === B"100"
   val isQ2T    = if(p.withQ2T) func3 === B"011" else False
   val isConfig = func3 === B"010"
@@ -312,6 +304,7 @@ class BitNetCfu(cfuParam: CfuBusParameter,
   if(cfuParam.CFU_WITH_STATUS) io.bus.rsp.status := B"000"
 
   val decode = new Area {
+    val FUNC7 = io.bus.cmd.raw_insn(31 downto 25).asUInt
     val RS1_RAW = io.bus.cmd.raw_insn(19 downto 15).asUInt
     val RS2_RAW = io.bus.cmd.raw_insn(24 downto 20).asUInt
     val RS1 = io.bus.cmd.raw_insn(19 downto 15).asUInt.resize(regSelWidth)
@@ -363,6 +356,18 @@ class BitNetCfu(cfuParam: CfuBusParameter,
     when(io.bus.cmd.fire && isQ2T) {
       ABSMAX := io.bus.cmd.inputs(0).asBits.resize(32)
       RS2 := decode.RS2
+    }
+  }
+
+  val q8Read = p.withQ8 generate new Area {
+    val ABSMAX = Reg(Bits(32 bits)) init(0)
+    val RS2 = Reg(UInt(regSelWidth bits)) init(0)
+    val OFFSET = Reg(UInt(vlenLog2 bits)) init(0)
+
+    when(io.bus.cmd.fire && isQ8) {
+      ABSMAX := io.bus.cmd.inputs(0).asBits.resize(32)
+      RS2 := decode.RS2
+      OFFSET := (decode.FUNC7.resize(vlenLog2) |<< log2Up(quantWidth)).resize(vlenLog2)
     }
   }
 
@@ -424,63 +429,179 @@ class BitNetCfu(cfuParam: CfuBusParameter,
     }
   }
 
-  val q2t = p.withQ2T generate new Area {
+  val quant = (p.withQ2T || p.withQ8) generate new Area {
+    val result = Bits(reslen bits)
+    val done = Bool()
+
+    result := 0
+    done := False
+
+    val selQ2T = if(p.withQ2T) Bool() else null
+    val selQ8 = if(p.withQ8) Bool() else null
+
+    if(p.withQ2T) selQ2T := False
+    if(p.withQ8) selQ8 := False
+
+    val busy = RegInit(False)
+    val doneReg = RegInit(False)
+    val modeQ8 = Reg(Bool()) init(False)
+    val bitId = Reg(UInt(3 bits)) init(0)
     val offset = Reg(UInt(vlenLog2 bits)) init(0)
-    val acc = Reg(Bits(reslen bits)) init(0)
-    val sel = Bool()
-    val doneNow = (if(nQ2TCompute == 1) True else offset === U(vlen - q2tWidth, vlenLog2 bits)) && sel
+    val absReg = Reg(Bits(32 bits)) init(0)
+    val opReg = Reg(Bits(quantWidth bits)) init(0)
+    val levels = Vec.fill(quantLanes)(Reg(UInt(8 bits)) init(0))
+    val resultReg = Reg(Bits(reslen bits)) init(0)
+    val usePipe = p.q8ComparePipe
+    val inFlight = if(usePipe) RegInit(False) else null
 
-    sel := False
-
-    when(io.bus.cmd.fire && isQ2T) {
-      offset := 0
-      acc := 0
-    }
-
-    val usePipe = p.computePipe
-    val nStages = if(usePipe) 1 else 0
-    val stages = Array.fill(nStages + 1)(Node())
-    val extractStage = stages(0)
-    val computeStage = stages(nStages)
+    val stages = Array.fill((if(usePipe) 2 else 1))(Node())
+    val prepareStage = stages(0)
+    val compareStage = stages(stages.length - 1)
 
     val SEL = Payload(Bool())
-    val DONE = Payload(Bool())
+    val MODE_Q8 = Payload(Bool())
+    val LAST = Payload(Bool())
     val ABS = Payload(Bits(32 bits))
-    val OP = Payload(Bits(q2tWidth bits))
+    val OP = Payload(Bits(quantWidth bits))
     val OFFSET = Payload(UInt(vlenLog2 bits))
+    val LEVELS = Payload(Bits(quantLanes * 8 bits))
+    val TRIALS = Payload(Bits(quantLanes * 8 bits))
 
-    val shiftOffset = sel && !doneNow
-    when(shiftOffset) {
-      if(nQ2TCompute != 1) offset := offset + U(q2tWidth, vlenLog2 bits)
-    }
+    val selected = (if(p.withQ2T) selQ2T && !modeQ8 else False) || (if(p.withQ8) selQ8 && modeQ8 else False)
+    val launch = selected && busy && (if(usePipe) !inFlight else True)
 
-    val extract = new extractStage.Area {
-      ABS := q2tRead.ABSMAX
-      OP := vecRead(q2tRead.RS2)(offset, q2tWidth bits)
+    val prepare = new prepareStage.Area {
+      val levelsPacked = Bits(quantLanes * 8 bits)
+      val trialsPacked = Bits(quantLanes * 8 bits)
+
+      for(i <- 0 until quantLanes) {
+        val bitMask = (U(1, 8 bits) |<< bitId).resize(8)
+        val trial = levels(i) | bitMask
+
+        levelsPacked(8 * i, 8 bits) := levels(i).asBits
+        trialsPacked(8 * i, 8 bits) := trial.asBits
+      }
+
+      SEL := launch
+      MODE_Q8 := modeQ8
+      LAST := modeQ8.mux(bitId === U(0, 3 bits), offset === U(vlen - quantWidth, vlenLog2 bits))
+      ABS := absReg
+      OP := opReg
       OFFSET := offset
-      SEL := sel
-      DONE := doneNow
+      LEVELS := levelsPacked
+      TRIALS := trialsPacked
     }
 
-    val quant = new computeStage.Area {
-      val partial = BitNetQ2T(ABS, OP, q2tLanes, reslen)
-      val shift = (OFFSET |>> 4).resize(log2Up(reslen + 1))
-      val shifted = (partial.asUInt |<< shift).asBits.resize(reslen)
-      val packed = acc | shifted
+    val compare = new compareStage.Area {
+      val nextLevels = Vec(UInt(8 bits), quantLanes)
+      val partialQ2T = Bits(reslen bits)
+      val packedQ8 = Bits(reslen bits)
+      val q2tShift = (OFFSET |>> 4).resize(log2Up(reslen + 1))
+      val packedQ2T = (partialQ2T.asUInt |<< q2tShift).asBits.resize(reslen)
+
+      partialQ2T := 0
+      packedQ8 := 0
+
+      for(i <- 0 until quantLanes) {
+        val level = LEVELS(8 * i, 8 bits).asUInt
+        val trial = TRIALS(8 * i, 8 bits).asUInt
+        val keep = BitNetQ8Keep(ABS, OP(32 * i, 32 bits), trial)
+        val q8Level = UInt(8 bits)
+        val q2tCode = Bits(2 bits)
+        val q8Code = Bits(8 bits)
+
+        q8Level := level
+        when(keep) {
+          q8Level := trial
+        }
+        nextLevels(i) := q8Level
+
+        q2tCode := B"00"
+        when(keep) {
+          q2tCode := OP(32 * i + 31).mux(B"11", B"01")
+        }
+        partialQ2T(2 * i, 2 bits) := q2tCode
+
+        q8Code := OP(32 * i + 31).mux((U(0, 8 bits) - q8Level).asBits, q8Level.asBits)
+        packedQ8(8 * i, 8 bits) := q8Code
+      }
 
       when(SEL) {
-        if(nQ2TCompute != 1) acc := packed
-      } otherwise {
-        acc := 0
+        if(usePipe) inFlight := False
+        when(MODE_Q8) {
+          for(i <- 0 until quantLanes) {
+            levels(i) := nextLevels(i)
+          }
+          when(LAST) {
+            resultReg := packedQ8
+            busy := False
+            doneReg := True
+          } otherwise {
+            bitId := bitId - 1
+          }
+        } otherwise {
+          resultReg := resultReg | packedQ2T
+          when(LAST) {
+            busy := False
+            doneReg := True
+          } otherwise {
+            if(p.withQ2T) {
+              val nextOffset = OFFSET + U(quantWidth, vlenLog2 bits)
+              offset := nextOffset
+              opReg := vecRead(q2tRead.RS2)(nextOffset, quantWidth bits)
+            }
+          }
+        }
       }
     }
 
-    val result = quant.packed
-    val done = computeStage(DONE)
-
     if(usePipe) {
-      val links = for(i <- 0 until nStages) yield StageLink(stages(i), stages(i + 1))
-      Builder(links)
+      Builder(StageLink(stages(0), stages(1)))
+    }
+
+    val startQ2T = if(p.withQ2T) selQ2T && !busy && !doneReg else False
+    val startQ8 = if(p.withQ8) selQ8 && !busy && !doneReg else False
+
+    if(p.withQ2T) {
+      when(startQ2T) {
+        busy := True
+        doneReg := False
+        modeQ8 := False
+        bitId := U(6, 3 bits)
+        offset := 0
+        absReg := q2tRead.ABSMAX
+        opReg := vecRead(q2tRead.RS2)(0, quantWidth bits)
+        levels.foreach(_ := U(0, 8 bits))
+        resultReg := 0
+        if(usePipe) inFlight := False
+      }
+    }
+    if(p.withQ8) {
+      when(startQ8) {
+        busy := True
+        doneReg := False
+        modeQ8 := True
+        bitId := U(6, 3 bits)
+        offset := q8Read.OFFSET
+        absReg := q8Read.ABSMAX
+        opReg := vecRead(q8Read.RS2)(q8Read.OFFSET, quantWidth bits)
+        levels.foreach(_ := U(0, 8 bits))
+        resultReg := 0
+        if(usePipe) inFlight := False
+      }
+    }
+    when(launch) {
+      if(usePipe) inFlight := True
+    }
+    when(!(if(p.withQ2T) selQ2T else False) && !(if(p.withQ8) selQ8 else False)) {
+      when(doneReg) {
+        doneReg := False
+      }
+    }
+
+    when(doneReg) {
+      result := resultReg
+      done := True
     }
   }
 
@@ -514,6 +635,7 @@ class BitNetCfu(cfuParam: CfuBusParameter,
     val LOAD = new State
     val BDOTP = new State
     val Q2TP = p.withQ2T generate new State
+    val Q8P = p.withQ8 generate new State
 
     IDLE.whenIsActive {
       when(io.bus.cmd.fire) {
@@ -554,15 +676,31 @@ class BitNetCfu(cfuParam: CfuBusParameter,
             goto(Q2TP)
           }
         }
+        if(p.withQ8) {
+          when(isQ8) {
+            goto(Q8P)
+          }
+        }
       }
     }
 
     if(p.withQ2T) {
       Q2TP.whenIsActive {
-        q2t.sel := (if(p.computePipe) !q2t.done else True)
-        when(q2t.done) {
+        quant.selQ2T := (if(p.computePipe) !quant.done else True)
+        when(quant.done) {
           io.bus.rsp.valid := True
-          io.bus.rsp.outputs(0) := q2t.result
+          io.bus.rsp.outputs(0) := quant.result
+          goto(IDLE)
+        }
+      }
+    }
+
+    if(p.withQ8) {
+      Q8P.whenIsActive {
+        quant.selQ8 := !quant.done
+        when(quant.done) {
+          io.bus.rsp.valid := True
+          io.bus.rsp.outputs(0) := quant.result
           goto(IDLE)
         }
       }
