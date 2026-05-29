@@ -87,8 +87,8 @@ case class AddressTranslationInvalidationCmd(p: AddressTranslationInvalidationPa
   val asid = Bits(p.asidWidth bits)
   val address = p.requestAddress generate MIXED_ADDRESS()
   val guest = p.requestGuest generate Bool()
-  /* For match both guest and non-guest */
-  val both = p.requestGuest generate Bool()
+  /* For reset */
+  val force = Bool()
 }
 
 /**

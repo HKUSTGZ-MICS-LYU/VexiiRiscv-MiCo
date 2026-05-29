@@ -676,9 +676,9 @@ class MmuPlugin(var spec : MmuSpec,
       val asid = RegInit(B(0, asidWidth bits))
       val address = RegInit(U(0, MIXED_WIDTH bits))
       val guest = withGuestSfenceCheck generate RegInit(False)
-      val both = withGuestSfenceCheck generate RegInit(False)
+      val force = RegInit(False)
 
-      val anyAsid = (asidWidth > 0).mux(asid === 0, True)
+      val anyAsid = (asidWidth > 0).mux(asid === 0, True) || force
       val anyAddress = address === 0
       val query = MmuTlbStorageEntryQuery(
         address = address,
@@ -693,10 +693,8 @@ class MmuPlugin(var spec : MmuSpec,
           busy := True
           asid := arbiter.io.output.asid.resized
           address := arbiter.io.output.address.resized
-          if (withGuestSfenceCheck) {
-            guest := arbiter.io.output.guest
-            both := arbiter.io.output.both
-          }
+          force := arbiter.io.output.force
+          if (withGuestSfenceCheck) guest := arbiter.io.output.guest
         }
       } otherwise {
         assert(HART_COUNT.get == 1)
@@ -705,7 +703,7 @@ class MmuPlugin(var spec : MmuSpec,
           val invalidateReadAddress = Mux(anyAddress, counter.resized, address(sl.lineRange))
           val mask = B(sl.ways.map(way => {
             val entry = way.readAsync(invalidateReadAddress)
-            entry.needFlush(query, anyAsid, anyAddress) || both
+            entry.needFlush(query, anyAsid, anyAddress) || force
           }))
           sl.write.mask := mask
           sl.write.address := invalidateReadAddress

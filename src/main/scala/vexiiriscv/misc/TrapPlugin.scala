@@ -446,16 +446,14 @@ class TrapPlugin(val trapAt : Int, val recordHtinst : Boolean) extends FiberPlug
             val invalidate = ats.newInvalidationPort()
             invalidate.cmd.valid := False
             invalidate.cmd.hartId := hartId
-            invalidate.cmd.address := 0
-            invalidate.cmd.asid := 0
-            if (invalidate.p.requestGuest) {
-              invalidate.cmd.guest := False
-              invalidate.cmd.both := True
-            }
+            invalidate.cmd.address := pending.state.tval.asUInt.resized
+            invalidate.cmd.asid := pending.state.tval2.resized
+            if (invalidate.p.requestGuest) invalidate.cmd.guest := pending.state.arg(0)
 
             val invalidated = RegInit(False) setWhen(invalidate.cmd.fire)
             invalidate.cmd.valid setWhen(!invalidated)
             resetToRunConditions += invalidated
+            invalidate.cmd.force := !invalidated
           }
 
           val satsPorts = sats.mayNeedRedo generate new Area{
@@ -641,13 +639,6 @@ class TrapPlugin(val trapAt : Int, val recordHtinst : Boolean) extends FiberPlug
                 is(TrapReason.SFENCE_VMA) {
                   if(ats.mayNeedRedo) {
                     atsPorts.invalidate.cmd.valid := True
-                    atsPorts.invalidate.cmd.address := pending.state.tval.asUInt.resized
-                    atsPorts.invalidate.cmd.asid := pending.state.tval2.resized
-                    if (atsPorts.invalidate.p.requestGuest) {
-                      atsPorts.invalidate.cmd.guest := pending.state.arg(0)
-                      atsPorts.invalidate.cmd.both := False
-                    }
-
                     when(atsPorts.invalidate.cmd.ready) {
                       goto(JUMP)
                     }
