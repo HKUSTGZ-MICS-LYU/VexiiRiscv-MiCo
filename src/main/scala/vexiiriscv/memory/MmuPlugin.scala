@@ -469,6 +469,7 @@ class MmuPlugin(var spec : MmuSpec,
       val storageEnable = Reg(Bool())
       val isTwoStage = Reg(Bool())
       val isGlobal = Reg(Bool())
+      val asid = Reg(Bits(asidWidth bits))
 
       arbiter.io.output.ready := False
       IDLE whenIsActive {
@@ -484,6 +485,10 @@ class MmuPlugin(var spec : MmuSpec,
           load.address := (ppn @@ spec.levels.last.vpn(arbiter.io.output.address) @@ U(0, log2Up(spec.entryBytes) bits)).resized
           isTwoStage := arbiter.io.output.indirect
           isGlobal := False
+          asid := priv.implementHypervisor.mux(
+            Mux(arbiter.io.output.indirect, vsatp.asid, satp.asid),
+            satp.asid
+          )
           arbiter.io.output.ready := True
           goto(CMD(spec.levels.size - 1))
         }
@@ -650,7 +655,6 @@ class MmuPlugin(var spec : MmuSpec,
             val storageLevelId = storage.self.p.levels.filter(_.id <= levelId).map(_.id).max
             val storageLevel = storage.sl.find(_.slp.id == storageLevelId).get
             val specLevel = storageLevel.level
-            val currentAsid = priv.implementHypervisor.mux(Mux(isTwoStage, vsatp.asid, satp.asid), satp.asid)
 
             val sel = storageOhReg(sid)
             storageLevel.write.mask                 := UIntToOh(storageLevel.allocId).andMask(sel).resized
@@ -658,7 +662,7 @@ class MmuPlugin(var spec : MmuSpec,
             storageLevel.write.data.valid           := True
             storageLevel.write.data.virtualAddress  := virtual(specLevel.virtualOffset + log2Up(storageLevel.slp.sets), widthOf(storageLevel.write.data.virtualAddress) bits)
             storageLevel.write.data.physicalAddress := (load.levelToPhysicalAddress(levelId) >> specLevel.virtualOffset).resized
-            if (asidWidth > 0) storageLevel.write.data.asid := currentAsid
+            if (asidWidth > 0) storageLevel.write.data.asid := asid
             storageLevel.write.data.allowRead       := load.flags.R
             storageLevel.write.data.allowWrite      := load.flags.W && load.flags.D
             storageLevel.write.data.allowExecute    := load.flags.X
