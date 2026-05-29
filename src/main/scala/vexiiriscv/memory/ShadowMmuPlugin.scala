@@ -95,6 +95,7 @@ class ShadowMmuPlugin(var spec : MmuSpec,
     val tlbGenerateParam = MmuTlbStorageEntryParam(
       asidWidth   = 0,
       checkUser   = false,
+      checkGlobal = false,
       checkGuest  = false
     )
     val storages = for(ss <- storageSpecs) yield new MmuTlbStorage(spec, physicalWidth, tlbGenerateParam, ss)

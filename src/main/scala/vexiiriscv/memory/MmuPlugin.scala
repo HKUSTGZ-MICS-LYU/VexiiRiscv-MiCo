@@ -83,6 +83,7 @@ object MmuSpec{
 case class MmuTlbStorageEntryParam(
   asidWidth: Int,
   checkUser: Boolean,
+  checkGlobal: Boolean,
   checkGuest: Boolean
 )
 
@@ -109,19 +110,21 @@ class MmuTlbStorageEntry(
   val allowRead, allowWrite, allowExecute = Bool()
   val allowUser = p.checkUser generate Bool()
   val guest = p.checkGuest generate Bool()
+  val global = p.checkGlobal generate Bool()
 
   def hit(address : UInt) = /*valid && */virtualAddress === address(spec.levels(levelId).virtualOffset + log2Up(depth), vw - log2Up(depth) bits)
   def hit(query : MmuTlbStorageEntryQuery): Bool = {
     val addressCheck = hit(query.address)
-    val asidCheck = (p.asidWidth > 0).mux(asid === query.asid, True)
+    val asidCheck = (p.asidWidth > 0).mux(asid === query.asid, True) || p.checkGlobal.mux(global, False)
     val guestCheck = p.checkGuest.mux(guest === query.guest, True)
     addressCheck && asidCheck && guestCheck
   }
   def needFlush(query : MmuTlbStorageEntryQuery, anyAsid : Bool, anyAddress : Bool) = {
     val addressCheck = hit(query.address) || anyAddress
-    val asidCheck = (p.asidWidth > 0).mux(asid === query.asid, True) || anyAsid
+    val asidCheck = (p.asidWidth > 0).mux(asid === query.asid, True)
+    val globalCheck = (asidCheck && p.checkGlobal.mux(!global, True)) || anyAsid
     val guestCheck = p.checkGuest.mux(guest === query.guest, True)
-    addressCheck && asidCheck && guestCheck
+    addressCheck && globalCheck && guestCheck
   }
   def physicalAddressFrom(address : UInt) = physicalAddress @@ address(0, spec.levels(levelId).physicalOffset bits)
 }
@@ -227,6 +230,8 @@ class MmuPlugin(var spec : MmuSpec,
                 var physicalWidth : Int,
                 var asidWidth : Int,
                 var withGuestSfenceCheck : Boolean) extends FiberPlugin with GenericMmuPlugin{
+  def withGlobalCheck = asidWidth > 0
+
   override def isShadowMmu : Boolean = false
 
   val api = during build new Area{
@@ -333,6 +338,7 @@ class MmuPlugin(var spec : MmuSpec,
     val tlbGenerateParam = MmuTlbStorageEntryParam(
       asidWidth   = asidWidth,
       checkUser   = true,
+      checkGlobal = withGlobalCheck,
       checkGuest  = priv.implementHypervisor
     )
     val storages = for(ss <- storageSpecs) yield new MmuTlbStorage(spec, physicalWidth, tlbGenerateParam, ss)
@@ -462,6 +468,7 @@ class MmuPlugin(var spec : MmuSpec,
       val storageOhReg = Reg(Bits(storages.size bits))
       val storageEnable = Reg(Bool())
       val isTwoStage = Reg(Bool())
+      val isGlobal = Reg(Bool())
 
       arbiter.io.output.ready := False
       IDLE whenIsActive {
@@ -476,6 +483,7 @@ class MmuPlugin(var spec : MmuSpec,
           virtual := arbiter.io.output.address
           load.address := (ppn @@ spec.levels.last.vpn(arbiter.io.output.address) @@ U(0, log2Up(spec.entryBytes) bits)).resized
           isTwoStage := arbiter.io.output.indirect
+          isGlobal := False
           arbiter.io.output.ready := True
           goto(CMD(spec.levels.size - 1))
         }
@@ -616,6 +624,7 @@ class MmuPlugin(var spec : MmuSpec,
         RSP(levelId) whenIsActive{
           if(levelId == 0) load.exception setWhen(!load.leaf)
           when(load.rsp.valid){
+            isGlobal := load.flags.G | isGlobal
             levelId match {
               case 0 => rspCheck
               case _ => {
@@ -654,6 +663,7 @@ class MmuPlugin(var spec : MmuSpec,
             storageLevel.write.data.allowWrite      := load.flags.W && load.flags.D
             storageLevel.write.data.allowExecute    := load.flags.X
             storageLevel.write.data.allowUser       := load.flags.U
+            if (asidWidth > 0) storageLevel.write.data.global := isGlobal
             if (priv.implementHypervisor) storageLevel.write.data.guest := isTwoStage
 
             storageLevel.allocId.increment()
