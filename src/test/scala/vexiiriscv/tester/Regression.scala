@@ -64,7 +64,8 @@ class Regression extends MultithreadedFunSuite(sys.env.getOrElse("VEXIIRISCV_REG
   addDim("divParam", List(2, 4).flatMap(radix => List("", "--div-ipc").map(opt => s"$opt --div-radix $radix")))
   addDim("rva", List("", "--with-mul --with-div --with-rva"))
   addDim("rvc", List("", "--with-mul --with-div --with-rvc"))
-  addDim("rvh", List("", "--with-isa h"))
+  /* Only test hypervisor with a generic system */
+  addDim("rvh", List("", "--with-isa i,m,a,f,d,c,h"))
   addDim("rvzb", List("", "--with-rvZb"))
   addDim("late-alu", List("", "--with-late-alu"))
   addDims("fetch")(
