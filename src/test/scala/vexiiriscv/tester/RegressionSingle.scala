@@ -32,10 +32,12 @@ class RegressionSingleConfig(){
   var traceKonata = false
   var traceRvlsLog = false
   var traceSpikeLog = false
+  var withSim = true
 
   def fromEnv(): this.type = {
     freertosCount = sys.env.getOrElse("VEXIIRISCV_REGRESSION_FREERTOS_COUNT", "1").toInt
     buildroot = sys.env.getOrElse("VEXIIRISCV_REGRESSION_BUILDROOT_ENABLED", "1").toInt.toBoolean
+    withSim = sys.env.getOrElse("VEXIIRISCV_REGRESSION_SIM", "1") == "1"
     this
   }
 
@@ -489,24 +491,31 @@ class RegressionSingle(compiled : SimCompiled[VexiiRiscv],
  */
 object RegressionSingle extends App{
   def test(name : String, plugins : => scala.collection.Seq[Hostable], dutArgs : Seq[String], config : RegressionSingleConfig): Unit = {
-    val simConfig = SpinalSimConfig()
-//    simConfig.withIVerilog
-    simConfig.withFstWave
-    simConfig.setTestPath("regression/$COMPILED_tests/$TEST")
-    val compiled = SpinalConfig.synchronized(simConfig.compile(VexiiRiscv(plugins).setDefinitionName(s"VexiiRiscv_$name")))
-    val regression = new RegressionSingle(compiled, dutArgs, config)
-    println("*" * 80)
-    val fails = regression.jobs.filter(_.failed)
-    if (fails.isEmpty) {
-      println("PASS")
-      return
+    def gen = VexiiRiscv(plugins).setDefinitionName(s"VexiiRiscv_$name")
+    if(config.withSim) {
+      val simConfig = SpinalSimConfig()
+      //    simConfig.withIVerilog
+      simConfig.withFstWave
+      simConfig.setTestPath("regression/$COMPILED_tests/$TEST")
+      val compiled = SpinalConfig.synchronized(simConfig.compile(gen))
+      val regression = new RegressionSingle(compiled, dutArgs, config)
+      println("*" * 80)
+      val fails = regression.jobs.filter(_.failed)
+      if (fails.isEmpty) {
+        println("PASS")
+        return
+      }
+      println(s"FAILED ${fails.size}/${regression.jobs.size}")
+      for (fail <- fails) {
+        println("- " + fail.logsFile.getAbsolutePath)
+      }
+      Thread.sleep(10)
+      throw new Exception()
+    } else {
+      val config = SpinalConfig()
+      config.targetDirectory = "./simWorkspace"
+      config.generateVerilog(gen)
     }
-    println(s"FAILED ${fails.size}/${regression.jobs.size}")
-    for (fail <- fails) {
-      println("- " + fail.logsFile.getAbsolutePath)
-    }
-    Thread.sleep(10)
-    throw new Exception()
   }
 
   def test(ps : ParamSimple, dutArgs : Seq[String], config : RegressionSingleConfig): Unit = {
