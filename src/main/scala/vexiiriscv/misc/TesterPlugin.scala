@@ -33,6 +33,7 @@ class TesterPlugin extends FiberPlugin{
 
   val ptw = during setup (host.get[MmuPlugin].nonEmpty generate new Area{
     val ats = host.find[AddressTranslationService](!_.isShadowMmu)
+    val priv = host[PrivilegedPlugin]
     val earlyLock = retains(ats.portsLock)
 
     awaitBuild()
@@ -50,6 +51,8 @@ class TesterPlugin extends FiberPlugin{
     ptw.cmd.address := address.value.asSInt.resize(widthOf(ptw.cmd.address)).asUInt
     ptw.cmd.storageId := 0
     ptw.cmd.storageEnable := False
+    if (priv.implementHypervisor) ptw.cmd.indirect := False
+    ptw.rsp.ready := True
 
     val pending = CounterUpDown(4, ptw.cmd.fire, ptw.rsp.fire)
     when(pending.mayOverflow){
