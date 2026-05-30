@@ -512,9 +512,21 @@ object RegressionSingle extends App{
       Thread.sleep(10)
       throw new Exception()
     } else {
-      val config = SpinalConfig()
-      config.targetDirectory = "./simWorkspace"
-      config.generateVerilog(gen)
+      val f = new File("regression", "FAIL_" + name)
+      try {
+        val config = SpinalConfig()
+        config.targetDirectory = "./regression"
+        config.generateVerilog(gen)
+      }catch {
+        case t : Throwable => {
+          FileUtils.forceMkdir(new File("regression"))
+          val argsFile = new BufferedWriter(new FileWriter(f))
+          argsFile.write(dutArgs.map(v => if (v.contains(" ")) '"' + v + '"' else v).mkString(" "))
+          argsFile.close()
+          throw t;
+        }
+      }
+      FileUtils.forceDelete(f)
     }
   }
 
