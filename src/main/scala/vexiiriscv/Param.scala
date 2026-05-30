@@ -722,12 +722,12 @@ class ParamSimple() {
     opt[Unit]("with-hypervisor") action { (v, c) => addISA("h", "s", "u") }
     opt[Unit]("with-supervisor") action { (v, c) => addISA("s", "u") }
     opt[Unit]("with-user") action { (v, c) => addISA("u") }
-    opt[Unit]("without-mmu") action { (v, c) => disableMmu = false }
+    opt[Unit]("without-mmu") action { (v, c) => disableMmu = true }
     opt[Unit]("without-mul") action { (v, c) => removeISA("m", "zmmul") }
     opt[Unit]("without-div") action { (v, c) => if(checkISA("m")) {removeISA("m"); addISA("zmmul")} }
     opt[Unit]("with-tester-plugin") action { (v, c) => withTesterPlugin = true }
-    opt[Unit]("with-mul") action { (v, c) => addISA("zmmul") }
-    opt[Unit]("with-div") action { (v, c) => addISA("m") }
+    opt[Unit]("with-mul").unbounded() action { (v, c) => addISA("zmmul") }
+    opt[Unit]("with-div").unbounded() action { (v, c) => addISA("m") }
     opt[Unit]("with-gshare") action { (v, c) => withGShare = true }
     opt[Unit]("with-btb") action { (v, c) => withBtb = true }
     opt[Unit]("with-ras") action { (v, c) => withRas = true }

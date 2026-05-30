@@ -462,7 +462,7 @@ class FetchL1Plugin(var translationStorageParameter: Any,
     val hits = new pp.Fetch(hitsAt){
       val withDirectHits = !hitsWithTranslationWays || onAddress0.translationPort.wayCount == 0
 
-      val state = new Area {
+      val state = !withDirectHits generate new Area {
         val stage1 = new Area {
           val enter = tpk.WAYS_OH.orR
           val translatedTag = OhMux.or(
@@ -485,7 +485,7 @@ class FetchL1Plugin(var translationStorageParameter: Any,
       val w = for((way, wayId) <- ways.zipWithIndex) yield new Area{
         if (withDirectHits) WAYS_HITS(wayId) := WAYS_TAGS(wayId).loaded && WAYS_TAGS(wayId).address === stpk.TRANSLATED(tagRange)
 
-        val indirect = if(!withDirectHits) new Area{
+        val indirect = !withDirectHits generate new Area{
           val tag = WAYS_TAGS(wayId).address
           val stage1 = new Area {
             import state.stage1._

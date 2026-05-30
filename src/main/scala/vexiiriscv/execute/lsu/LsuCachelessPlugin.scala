@@ -145,11 +145,14 @@ class LsuCachelessPlugin(var layer : LaneLayer,
     for(uop <- frontend.writingMem if layer(uop).completion.isEmpty) layer(uop).setCompletion(joinAt)
 
     val hsl = pp.implementHypervisor generate new Area {
-      val privCheck = pp.getPrivilege(0) === PrivilegeMode.U && !pp.hart(0).h.status.hu
-      val virtCheck = PrivilegeMode.isGuest(pp.getPrivilege(0))
-
-      ds.addIllegalCheck(ctrlLane => ctrlLane(GUEST) && privCheck)
-      ds.addVirtualInstructionCheck(ctrlLane => ctrlLane(GUEST) && virtCheck)
+      ds.addIllegalCheck { ctrlLane =>
+        val privCheck = pp.getPrivilege(0) === PrivilegeMode.U && !pp.hart(0).h.status.hu
+        ctrlLane(GUEST) && privCheck
+      }
+      ds.addVirtualInstructionCheck { ctrlLane =>
+        val virtCheck = PrivilegeMode.isGuest(pp.getPrivilege(0))
+        ctrlLane(GUEST) && virtCheck
+      }
       ds.addMicroOpDecodingDefault(GUEST, False)
 
       var ops = ArrayBuffer(
@@ -484,7 +487,7 @@ class LsuCachelessPlugin(var layer : LaneLayer,
         assert(dbusAccesses.size == 1)
         val rsp = dbusAccesses.head.rsp
         rsp.valid := WITH_ACCESS && pop
-        rsp.data := rspPayload.data
+        rsp.data := rspPayload.data.resized
         rsp.error := rspPayload.error
         rsp.redo := False
         rsp.waitAny := False
