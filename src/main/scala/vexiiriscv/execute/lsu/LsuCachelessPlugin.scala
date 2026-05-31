@@ -449,6 +449,7 @@ class LsuCachelessPlugin(var layer : LaneLayer,
       val buffers = List.fill(bufferSize)(new Area {
         val valid = RegInit(False)
         val inflight = RegInit(False)
+        val address = Reg(UInt(bus.p.addressWidth bits))
         val payload = Reg(LsuCachelessRsp(bus.p, false))
       })
       cmdInflights := buffers.map(_.inflight).orR
@@ -458,6 +459,7 @@ class LsuCachelessPlugin(var layer : LaneLayer,
       when(bus.cmd.fire) {
         buffers.onSel(bus.cmd.id) { b =>
           b.inflight := True
+          b.address := bus.cmd.address
         }
       }
       when(bus.rsp.valid){
@@ -478,6 +480,7 @@ class LsuCachelessPlugin(var layer : LaneLayer,
       val busRspHit = bus.rsp.valid && bus.rsp.id === rspCounter
       val rspValid = readerValid || busRspHit
       val rspPayload = readerValid.mux(CombInit(reader(_.payload)), busRspWithoutId)
+      val rspAddress = reader(_.address)
 
       val SC_MISS = insert(withAmo.mux(rspPayload.scMiss, False))
       val READ_DATA = insert(rspPayload.data)
@@ -486,8 +489,16 @@ class LsuCachelessPlugin(var layer : LaneLayer,
       val access = dbusAccesses.nonEmpty generate new Area {
         assert(dbusAccesses.size == 1)
         val rsp = dbusAccesses.head.rsp
+        val rspData = if(LSLEN.get > XLEN.get) {
+          val chunks = rspPayload.data.subdivideIn(XLEN bits)
+          val selRange = log2Up(LSLEN.get / 8)-1 downto log2Up(XLEN.get / 8)
+          chunks.read(rspAddress(selRange))
+        } else {
+          rspPayload.data
+        }
+
         rsp.valid := WITH_ACCESS && pop
-        rsp.data := rspPayload.data.resized
+        rsp.data := rspData.resized
         rsp.error := rspPayload.error
         rsp.redo := False
         rsp.waitAny := False
