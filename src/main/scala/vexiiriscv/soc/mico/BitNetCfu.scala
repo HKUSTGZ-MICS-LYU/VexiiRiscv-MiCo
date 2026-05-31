@@ -454,9 +454,11 @@ class BitNetCfu(cfuParam: CfuBusParameter,
     val usePipe = p.q8ComparePipe
     val inFlight = if(usePipe) RegInit(False) else null
 
-    val stages = Array.fill((if(usePipe) 2 else 1))(Node())
+    val nStages = if(usePipe) 2 else 0
+    val stages = Array.fill(nStages + 1)(Node())
     val prepareStage = stages(0)
-    val compareStage = stages(stages.length - 1)
+    val compareStage = stages(if(usePipe) 1 else 0)
+    val commitStage = stages(nStages)
 
     val SEL = Payload(Bool())
     val MODE_Q8 = Payload(Bool())
@@ -466,6 +468,9 @@ class BitNetCfu(cfuParam: CfuBusParameter,
     val OFFSET = Payload(UInt(vlenLog2 bits))
     val LEVELS = Payload(Bits(quantLanes * 8 bits))
     val TRIALS = Payload(Bits(quantLanes * 8 bits))
+    val NEXT_LEVELS = Payload(Bits(quantLanes * 8 bits))
+    val PACKED_Q8 = Payload(Bits(reslen bits))
+    val PACKED_Q2T = Payload(Bits(reslen bits))
 
     val selected = (if(p.withQ2T) selQ2T && !modeQ8 else False) || (if(p.withQ8) selQ8 && modeQ8 else False)
     val launch = selected && busy && (if(usePipe) !inFlight else True)
@@ -494,6 +499,7 @@ class BitNetCfu(cfuParam: CfuBusParameter,
 
     val compare = new compareStage.Area {
       val nextLevels = Vec(UInt(8 bits), quantLanes)
+      val nextLevelsPacked = Bits(quantLanes * 8 bits)
       val partialQ2T = Bits(reslen bits)
       val packedQ8 = Bits(reslen bits)
       val q2tShift = (OFFSET |>> 4).resize(log2Up(reslen + 1))
@@ -501,6 +507,7 @@ class BitNetCfu(cfuParam: CfuBusParameter,
 
       partialQ2T := 0
       packedQ8 := 0
+      nextLevelsPacked := 0
 
       for(i <- 0 until quantLanes) {
         val level = LEVELS(8 * i, 8 bits).asUInt
@@ -515,6 +522,7 @@ class BitNetCfu(cfuParam: CfuBusParameter,
           q8Level := trial
         }
         nextLevels(i) := q8Level
+        nextLevelsPacked(8 * i, 8 bits) := q8Level.asBits
 
         q2tCode := B"00"
         when(keep) {
@@ -526,21 +534,27 @@ class BitNetCfu(cfuParam: CfuBusParameter,
         packedQ8(8 * i, 8 bits) := q8Code
       }
 
+      NEXT_LEVELS := nextLevelsPacked
+      PACKED_Q8 := packedQ8
+      PACKED_Q2T := packedQ2T
+    }
+
+    val commit = new commitStage.Area {
       when(SEL) {
         if(usePipe) inFlight := False
         when(MODE_Q8) {
           for(i <- 0 until quantLanes) {
-            levels(i) := nextLevels(i)
+            levels(i) := NEXT_LEVELS(8 * i, 8 bits).asUInt
           }
           when(LAST) {
-            resultReg := packedQ8
+            resultReg := PACKED_Q8
             busy := False
             doneReg := True
           } otherwise {
             bitId := bitId - 1
           }
         } otherwise {
-          resultReg := resultReg | packedQ2T
+          resultReg := resultReg | PACKED_Q2T
           when(LAST) {
             busy := False
             doneReg := True
@@ -556,7 +570,8 @@ class BitNetCfu(cfuParam: CfuBusParameter,
     }
 
     if(usePipe) {
-      Builder(StageLink(stages(0), stages(1)))
+      val links = for(i <- 0 until nStages) yield StageLink(stages(i), stages(i + 1))
+      Builder(links)
     }
 
     val startQ2T = if(p.withQ2T) selQ2T && !busy && !doneReg else False
