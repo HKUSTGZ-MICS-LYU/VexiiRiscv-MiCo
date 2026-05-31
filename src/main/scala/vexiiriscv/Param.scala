@@ -696,6 +696,7 @@ class ParamSimple() {
       fpuWbAt = 1
     }
     opt[Seq[String]]("with-isa").unbounded() action { (v, c) => addISA(v: _*) }
+    opt[Seq[String]]("without-isa").unbounded() action { (v, c) => removeISA(v: _*) }
     opt[Unit]("with-rvm") action { (v, c) => addISA("m") }
     opt[Unit]("with-rve") action { (v, c) => addISA("e"); removeISA("i") }
     opt[Unit]("with-rva") action { (v, c) => addISA("a") }

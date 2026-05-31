@@ -51,7 +51,7 @@ class Regression extends MultithreadedFunSuite(sys.env.getOrElse("VEXIIRISCV_REG
   }
 
 
-  addDim("default", List("--with-mul --with-div --performance-counters 4"))
+  addDim("default", List("--with-isa m --performance-counters 4"))
   addDim("lanes", List(1, 2).map(v => s"--lanes $v --decoders $v"))
   addDim("rf", List("--regfile-sync", "--regfile-async"))
   addDim("rfPorts", List("--regfile-infer-ports", "--regfile-dual-ports"))
@@ -60,13 +60,11 @@ class Regression extends MultithreadedFunSuite(sys.env.getOrElse("VEXIIRISCV_REG
   addDim("prediction", List("", "--with-btb", "--with-btb --with-ras", "--with-btb --with-ras --with-gshare"))
   addDim("btbSp", List("", "--btb-single-port-ram"))
   addDim("relaxedBranch", List("", "--relaxed-branch"))
-  addDim("rvm", List("--without-mul --without-div", "--with-mul --with-div"))
+  addDim("rvm", List("--without-isa m", "--with-isa m"))
   addDim("divParam", List(2, 4).flatMap(radix => List("", "--div-ipc").map(opt => s"$opt --div-radix $radix")))
-  addDim("rva", List("", "--with-mul --with-div --with-rva"))
-  addDim("rvc", List("", "--with-mul --with-div --with-rvc"))
-  /* Only test hypervisor with a generic system */
-  addDim("rvh", List("", "--with-isa i,m,a,f,d,c,h"))
-  addDim("rvzb", List("", "--with-rvZb"))
+  addDim("rva", List("", "--with-isa m,a"))
+  addDim("rvc", List("", "--with-isa m,c"))
+  addDim("rvzb", List("", "--with-isa b"))
   addDim("late-alu", List("", "--with-late-alu"))
   addDims("fetch")(
     Dim("", List("--fetch-fork-at 0", "--fetch-fork-at 1")),
@@ -107,7 +105,7 @@ class Regression extends MultithreadedFunSuite(sys.env.getOrElse("VEXIIRISCV_REG
   dimensions += new Dimensions[ParamSimple]("fpu") {
     override def getRandomPosition(state : ParamSimple, random: Random): String = {
       if(!state.withMul || !state.withDiv) return ""
-      return List("", "--with-rvf", "--with-rvf --with-rvd").randomPick(random)
+      return List("", "--with-isa f", "--with-isa f,d").randomPick(random)
     }
   }
   addDim("fpuStressed", List("", "--stressed-fpu"))
@@ -128,6 +126,14 @@ class Regression extends MultithreadedFunSuite(sys.env.getOrElse("VEXIIRISCV_REG
     override def getRandomPosition(state : ParamSimple, random: Random): String = {
       if(!state.withAlignerBuffer) return ""
       return  List(32, 64, 128, 256).map(w => s"--fetch-l1-mem-data-width-min $w").randomPick(random)
+    }
+  }
+
+  dimensions += new Dimensions[ParamSimple]("privileges") {
+    override def getRandomPosition(state : ParamSimple, random: Random): String = {
+      if(state.xlen == 32 && state.withRvd && !state.lsuL1Enable) return "" // LsuCachelessPlugin 64 bits doesn't support mmu access
+      /* Only test hypervisor with a generic system */
+      List("", "--with-isa s", "--with-isa s,u", "--with-isa g,h").randomPick(random)
     }
   }
 
@@ -156,13 +162,6 @@ class Regression extends MultithreadedFunSuite(sys.env.getOrElse("VEXIIRISCV_REG
     override def getRandomPosition(state : ParamSimple, random: Random): String = {
       if(!state.lsuL1Enable) return ""
       List("", state.lsuL1Coherency.mux("--with-rvZcbm-llc", "--with-rvZcbm")).randomPick(random)
-    }
-  }
-
-  dimensions += new Dimensions[ParamSimple]("privileges") {
-    override def getRandomPosition(state : ParamSimple, random: Random): String = {
-      if(state.xlen == 32 && state.withRvd && !state.lsuL1Enable) return "" // LsuCachelessPlugin 64 bits doesn't support mmu access
-      List("", "--with-supervisor", "--with-user").randomPick(random)
     }
   }
 
