@@ -3,8 +3,9 @@
 //| - com.typesafe:config:1.4.3
 package build
 
-import mill._, scalalib._
+import mill._, scalalib._, scalalib._, publish._
 import build.project.SpinalVersion
+import mill.api.Task.Simple
 
 trait VexiiRiscvCross extends SbtModule with CrossSbtModule {
   def moduleInfo = build.ext.SpinalHDL.SpinalModuleInfo(crossScalaVersion)
@@ -26,7 +27,12 @@ trait VexiiRiscvCross extends SbtModule with CrossSbtModule {
 
   def rvlsJniSource = Task.Sources("ext/rvls/bindings/jni")
   def rvlsSpinalSource = Task.Sources("ext/rvls/bindings/spinal")
-  def sources = Task { super.sources() ++ rvlsJniSource() ++ rvlsSpinalSource() }
+  override def sources = Task { super.sources() ++ rvlsJniSource() ++ rvlsSpinalSource() }
+  object test extends CrossSbtTests with TestModule.ScalaTest {
+    override def mvnDeps = Seq(mvn"org.scalatest::scalatest::3.2.17")
+    override def testSandboxWorkingDir: Simple[Boolean] = false
+  }
+  def testOnly(args: String*) = test.testOnly(args*)
 }
 
 object Test extends Cross[VexiiRiscvCross](SpinalVersion.compilers) {
