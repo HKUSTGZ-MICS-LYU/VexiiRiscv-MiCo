@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
@@ -35,6 +35,8 @@ class Config:
     with_q8: bool = False
     quant_width: int = 0
     q8_compare_pipe: bool = False
+    quant_standard: bool = False
+    rf_sync: bool = False
     stress: bool = False
     extra_args: List[str] = field(default_factory=list)
 
@@ -62,6 +64,9 @@ class Config:
             args.append("--bitnet-cfu-with-q8")
         if self.q8_compare_pipe:
             args.append("--bitnet-cfu-q8-compare-pipe")
+        if self.quant_standard:
+            args.append("--bitnet-cfu-quant-standard")
+        args.append("--bitnet-cfu-rf-sync" if self.rf_sync else "--bitnet-cfu-rf-async")
         if self.stress:
             args.append("--bitnet-cfu-stress")
         return args
@@ -130,7 +135,16 @@ def load_configs(path: Path) -> List[Config]:
     data = json.loads(path.read_text())
     if not isinstance(data, list):
         raise SystemExit("Config JSON must be a list of objects")
-    return [Config(**entry) for entry in data]
+    valid = {f.name for f in fields(Config)}
+    configs = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            raise SystemExit("Config JSON entries must be objects")
+        entry = dict(entry)
+        entry.pop("quant_normalized", None)
+        entry.pop("quant_serial", None)
+        configs.append(Config(**{k: v for k, v in entry.items() if k in valid}))
+    return configs
 
 
 def run(cmd: List[str], log_path: Path, cwd: Path = ROOT) -> None:
@@ -300,6 +314,8 @@ def collect(cfg: Config, rpt_dir: Path) -> Dict[str, object]:
         "with_q8": cfg.with_q8 if cfg.enable_bncfu else "",
         "quant_width": cfg.quant_width if cfg.enable_bncfu else "",
         "q8_compare_pipe": cfg.q8_compare_pipe if cfg.enable_bncfu else "",
+        "quant_standard": cfg.quant_standard if cfg.enable_bncfu else "",
+        "rf_sync": cfg.rf_sync if cfg.enable_bncfu else "",
     }
     row.update(parse_util(cfg_rpt / "util.rpt"))
     row.update(parse_power(cfg_rpt / "power.rpt"))
@@ -341,6 +357,8 @@ def write_markdown(rows: List[Dict[str, object]], path: Path) -> None:
         ("with_q8", "Q8"),
         ("quant_width", "QWIDTH"),
         ("q8_compare_pipe", "Q8_CPIPE"),
+        ("quant_standard", "Q_STD"),
+        ("rf_sync", "RF_SYNC"),
         ("lut", "LUT"),
         ("ff", "FF"),
         ("bram_tile", "BRAM tile"),

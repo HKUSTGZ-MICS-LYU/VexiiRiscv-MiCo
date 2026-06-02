@@ -35,6 +35,8 @@ class MiCoSocParam {
   var BitNetCfuStress = false
   var BitNetCfuPipe = false
   var BitNetCfuQ8ComparePipe = false
+  var BitNetCfuQuantStandard = false
+  var BitNetCfuRfSync = false
   var withL2Cache = false
   var l2Ways = 8
   var l2Bytes = 4096
@@ -79,12 +81,13 @@ class MiCoSocParam {
     opt[Unit]("bitnet-cfu-with-q2t") action { (v, c) => BitNetCfuWithQ2T = true }
     opt[Unit]("bitnet-cfu-without-q2t") action { (v, c) => BitNetCfuWithQ2T = false }
     opt[Int]("bitnet-cfu-quant-width") action { (v, c) => BitNetCfuQuantWidth = v }
-    opt[Int]("bitnet-cfu-q2t-width") action { (v, c) => if(BitNetCfuQuantWidth == 0) BitNetCfuQuantWidth = v }
     opt[Unit]("bitnet-cfu-with-q8") action { (v, c) => BitNetCfuWithQ8 = true }
-    opt[Int]("bitnet-cfu-q8-width") action { (v, c) => if(BitNetCfuQuantWidth == 0) BitNetCfuQuantWidth = v }
     opt[Unit]("bitnet-cfu-stress") action { (v, c) => BitNetCfuStress = true }
     opt[Unit]("bitnet-cfu-pipe") action { (v, c) => BitNetCfuPipe = true }
     opt[Unit]("bitnet-cfu-q8-compare-pipe") action { (v, c) => BitNetCfuQ8ComparePipe = true }
+    opt[Unit]("bitnet-cfu-quant-standard") action { (v, c) => BitNetCfuQuantStandard = true }
+    opt[Unit]("bitnet-cfu-rf-sync") action { (v, c) => BitNetCfuRfSync = true }
+    opt[Unit]("bitnet-cfu-rf-async") action { (v, c) => BitNetCfuRfSync = false }
     opt[Unit]("l2-cache") action { (v, c) => withL2Cache = true; vexii.lsuL1Coherency = true}
     opt[Unit]("with-hub") action { (v, c) => withHub = true; vexii.lsuL1Coherency = true}
     opt[Unit]("with-dma") action { (v, c) => withDma = true }
