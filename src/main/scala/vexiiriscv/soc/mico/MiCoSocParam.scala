@@ -36,7 +36,7 @@ class MiCoSocParam {
   var BitNetCfuPipe = false
   var BitNetCfuQ8ComparePipe = false
   var BitNetCfuQuantStandard = false
-  var BitNetCfuRfSync = false
+  var BitNetCfuRfSync = true
   var withL2Cache = false
   var l2Ways = 8
   var l2Bytes = 4096

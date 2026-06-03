@@ -102,6 +102,18 @@ object BitQuantCompute extends AreaObject {
     }
     shifted
   }
+
+  def shiftRight0To8(value: UInt, shift: UInt): UInt = {
+    val shifted = UInt(q8ProductWidth bits)
+
+    shifted := value
+    for(i <- 0 to 8) {
+      when(shift === U(i, shift.getWidth bits)) {
+        shifted := (value |>> i).resize(q8ProductWidth)
+      }
+    }
+    shifted
+  }
 }
 
 case class BitQuantLaneParameter(
@@ -117,10 +129,17 @@ class BitQuantLaneIO(p: BitQuantLaneParameter) extends Bundle {
   val start = in Bool()
   val qBits = in UInt(p.qBitsWidth bits)
   val absmax = in Bits(32 bits)
+  val absParts = in(new BitQuantAbsmaxParts)
   val value = in Bits(32 bits)
   val busy = out Bool()
   val done = out Bool()
   val result = out Bits(p.maxQuantBits bits)
+}
+
+class BitQuantAbsmaxParts extends Bundle {
+  val valid = Bool()
+  val effectiveExponent = UInt(8 bits)
+  val significand = UInt(BitQuantCompute.significandWidth bits)
 }
 
 class BitQuantNormalizedLane(p: BitQuantLaneParameter) extends Component {
@@ -135,30 +154,37 @@ class BitQuantNormalizedLane(p: BitQuantLaneParameter) extends Component {
   val signReg = RegInit(False)
   val validReg = RegInit(False)
   val xExpGreaterReg = RegInit(False)
-  val expDiffReg = Reg(UInt(9 bits)) init(0)
+  val expShiftReg = Reg(UInt(4 bits)) init(0)
+  val expDiffLargeReg = RegInit(False)
   val scaledMagnitudeReg = Reg(UInt(q8ProductWidth bits)) init(0)
   val absSignificandReg = Reg(UInt(significandWidth bits)) init(0)
   val levelReg = Reg(UInt(p.maxQuantBits bits)) init(0)
   val levelProductReg = Reg(UInt(q8ProductWidth bits)) init(0)
   val cursorReg = Reg(UInt(p.maxQuantBits bits)) init(0)
 
-  val absMagnitude = io.absmax(30 downto 0).asUInt
   val valueMagnitude = io.value(30 downto 0).asUInt
-  val absExponent = io.absmax(30 downto 23).asUInt
-  val valueExponent = io.value(30 downto 23).asUInt
-  val absValid = absMagnitude =/= 0 && absExponent =/= U(255, 8 bits)
+  val absValid = io.absParts.valid
   val valueNonZero = valueMagnitude =/= 0
-  val absParts = fp32MagnitudeParts(absMagnitude)
   val valueParts = fp32MagnitudeParts(valueMagnitude)
-  val expDiff = (absParts.effectiveExponent.resize(9) - valueParts.effectiveExponent.resize(9)).resize(9)
-  val expDiffValid = absParts.effectiveExponent >= valueParts.effectiveExponent
+  val expDiff = (io.absParts.effectiveExponent.resize(9) - valueParts.effectiveExponent.resize(9)).resize(9)
+  val expDiffValid = io.absParts.effectiveExponent >= valueParts.effectiveExponent
   val expDiffLarge = expDiff >= U(9, 9 bits)
+  val expShift = UInt(4 bits)
+
+  expShift := 0
+  when(expDiffValid) {
+    expShift := expDiff.resize(4)
+    when(expDiff >= U(8, 9 bits)) {
+      expShift := U(8, 4 bits)
+    }
+  }
+
   val q2tExpPlusOne = valueParts.effectiveExponent.resize(9) + U(1, 9 bits)
-  val q2tAbsExp = absParts.effectiveExponent.resize(9)
+  val q2tAbsExp = io.absParts.effectiveExponent.resize(9)
   val q2tKeep =
     absValid && valueNonZero &&
     (q2tExpPlusOne > q2tAbsExp ||
-      (q2tExpPlusOne === q2tAbsExp && valueParts.significand >= absParts.significand))
+      (q2tExpPlusOne === q2tAbsExp && valueParts.significand >= io.absParts.significand))
   val q2tResult = Bits(p.maxQuantBits bits)
   val q2tLevel = U(1, p.maxQuantBits bits)
 
@@ -195,9 +221,10 @@ class BitQuantNormalizedLane(p: BitQuantLaneParameter) extends Component {
     signReg := io.value(31)
     validReg := absValid && valueNonZero
     xExpGreaterReg := !expDiffValid
-    expDiffReg := expDiff
+    expShiftReg := expShift
+    expDiffLargeReg := expDiffValid && expDiffLarge
     scaledMagnitudeReg := q8Scale254(valueParts.significand)
-    absSignificandReg := absParts.significand
+    absSignificandReg := io.absParts.significand
     levelReg := 0
     levelProductReg := 0
     cursorReg := 0
@@ -227,10 +254,10 @@ class BitQuantNormalizedLane(p: BitQuantLaneParameter) extends Component {
   val candidateLevel = levelReg | cursorReg
   val candidateLevelProduct = (levelProductReg + selectedAdd).resize(q8ProductWidth)
   val thresholdProductWide = ((candidateLevelProduct.resize(q8ProductWidth + 1) |<< 1) - absSignificandReg.resize(q8ProductWidth + 1)).resize(q8ProductWidth)
-  val shiftedThreshold = shiftLeft0To8(thresholdProductWide, expDiffReg(3 downto 0))
+  val shiftedMagnitude = shiftRight0To8(scaledMagnitudeReg, expShiftReg)
   val q8Keep =
     validReg &&
-    (xExpGreaterReg || (!expDiffLarge && scaledMagnitudeReg.resize(q8CompareWidth) >= shiftedThreshold))
+    (xExpGreaterReg || (!expDiffLargeReg && shiftedMagnitude >= thresholdProductWide))
   val selectedLevel = UInt(p.maxQuantBits bits)
   val q8Code = Bits(p.maxQuantBits bits)
 

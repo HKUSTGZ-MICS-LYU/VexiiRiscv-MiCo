@@ -72,7 +72,7 @@ case class BitNetCfuParameter(
   var quantWidth : Int = 0,
   var noWaitCompute : Boolean = false,
   var rfRam : Boolean = true,
-  var rfSync : Boolean = false,
+  var rfSync : Boolean = true,
   var computePipe : Boolean = false,
   var q8ComparePipe : Boolean = false,
   var quantStandard : Boolean = false,
@@ -372,6 +372,14 @@ class BitNetCfu(cfuParam: CfuBusParameter,
       comparePipe = p.q8ComparePipe
     )
     val qBits2 = U(2, quantLaneParam.qBitsWidth bits)
+    val absMagnitude = absReg(30 downto 0).asUInt
+    val absExponent = absReg(30 downto 23).asUInt
+    val absPartsDecoded = BitQuantCompute.fp32MagnitudeParts(absMagnitude)
+    val absParts = new BitQuantAbsmaxParts
+
+    absParts.valid := absMagnitude =/= 0 && absExponent =/= U(255, 8 bits)
+    absParts.effectiveExponent := absPartsDecoded.effectiveExponent
+    absParts.significand := absPartsDecoded.significand
 
     val quantLanesIo = Array.tabulate(quantLanes) { _ =>
       if(p.quantStandard) {
@@ -395,6 +403,7 @@ class BitNetCfu(cfuParam: CfuBusParameter,
         quantLanesIo(i).qBits := qBits2
       }
       quantLanesIo(i).absmax := absReg
+      quantLanesIo(i).absParts := absParts
       quantLanesIo(i).value := opReg(32 * i, 32 bits)
       q2tPacked(2 * i, 2 bits) := quantLanesIo(i).result(0, 2 bits)
       if(p.withQ8) q8Packed(8 * i, 8 bits) := quantLanesIo(i).result(0, 8 bits)
