@@ -1205,8 +1205,8 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
     }
 
     val readAnyWriteLegal = new Area {
-      val tvecFilter = CsrListFilter(List(CSR.MTVEC) ++ p.withSupervisor.option(CSR.STVEC))
-      val epcFilter = CsrListFilter(List(CSR.MEPC) ++ p.withSupervisor.option(CSR.SEPC))
+      val tvecFilter = CsrListFilter(List(CSR.MTVEC) ++ p.withSupervisor.option(CSR.STVEC) ++ p.withHypervisor.option(CSR.VSTVEC))
+      val epcFilter = CsrListFilter(List(CSR.MEPC) ++ p.withSupervisor.option(CSR.SEPC) ++ p.withHypervisor.option(CSR.VSEPC))
       cap.onWrite(tvecFilter, false) {
         cap.bus.write.bits(0, 2 bits) := 0
       }
