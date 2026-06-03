@@ -76,7 +76,7 @@ class ShadowMmuPlugin(var spec : MmuSpec,
       val hgatpModeWrite = csr.bus.write.bits(hgatp.modeOffset, hgatp.modeWidth bits)
       when(hgatpModeWrite === 0) {
         hgatp.mode := 0
-      } otherwise {
+      } elsewhen (hgatpModeWrite === spec.satpMode) {
         hgatp.mode := spec.satpMode
       }
     }
