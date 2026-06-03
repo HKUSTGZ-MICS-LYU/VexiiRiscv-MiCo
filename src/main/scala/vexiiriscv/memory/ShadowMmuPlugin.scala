@@ -395,7 +395,6 @@ class ShadowMmuPlugin(var spec : MmuSpec,
             val translatedAddress = load.levelToPhysicalAddress(levelId)
             translatedAddress(0, level.virtualOffset bits) := virtual.resize(level.virtualOffset)
 
-            /* TODO: guestFault */
             o.bypass      := False
             o.pageFault   := Mux(translationFault, pageFault, permissionFault)
             o.accessFault := accessFault
