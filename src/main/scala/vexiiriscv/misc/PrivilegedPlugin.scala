@@ -161,6 +161,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
     if (RVD) addMisa('D')
     if (RVA) addMisa('A')
     if (RVM) addMisa('M')
+    if (RVB) addMisa('B')
     if (p.withUser) addMisa('U')
     if (p.withSupervisor) addMisa('S')
     if (p.withHypervisor) addMisa('H')

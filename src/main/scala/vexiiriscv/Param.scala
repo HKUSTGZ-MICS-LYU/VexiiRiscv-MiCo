@@ -597,7 +597,7 @@ class ParamSimple() {
 
     if(checkISA("g")) addISA("i", "m", "a", "f", "d", "s", "u")
     if(checkISA("b")) {
-      addISA("zba", "zbb", "zbc", "zbs")
+      addISA("zba", "zbb", "zbs")
       removeISA("b")
     }
 
@@ -847,7 +847,7 @@ class ParamSimple() {
 
     val intWritebackAt = 2 + withRvh.toInt //Alias for "trap at" as well
 
-    plugins += new riscv.RiscvPlugin(xlen, hartCount, rvf = withRvf, rvd = withRvd, rvc = withRvc, rvh = withRvh, rve = withRve)
+    plugins += new riscv.RiscvPlugin(xlen, hartCount, isa = withISA.toSet)
     if (withMmu) plugins += new TranslatedDBusAccessPlugin()
     withMmu match {
       case false => plugins += new vexiiriscv.memory.StaticTranslationPlugin(physicalWidth)
