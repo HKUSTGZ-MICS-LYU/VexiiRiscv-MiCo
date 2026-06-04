@@ -24,7 +24,7 @@ case class CsrOnReadData (bitOffset : Int, value : Bits)
 case class CsrIsReadingHartId(hartId : Int, value : Bool)
 
 /**
- * CSR filter which ckecks both CSR id and runtime condition
+ * CSR filter which checks both CSR id and runtime condition
  *
  * The CSR filter serves as an enhanced csr filter with extra runtime check.
  * It is designed to simplify CSR with complex access requirement (such as
@@ -337,7 +337,7 @@ object CsrRamService{
   }
 }
 
-//usefull for, for instance, mscratch scratch mtvec stvec mepc sepc mtval stval satp pmp stuff
+// Useful for, for instance, mscratch scratch mtvec stvec mepc sepc mtval stval satp pmp stuff
 trait CsrRamService extends Area{
   val portLock = Retainer()
   val csrLock = Retainer()

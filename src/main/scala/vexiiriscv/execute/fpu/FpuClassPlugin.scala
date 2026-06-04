@@ -11,7 +11,7 @@ import vexiiriscv.riscv.Riscv.RVC
 import vexiiriscv.riscv._
 
 /**
- * Provide the RISC-V fclass instruction, which allows to figure out the kind of a given floating point number
+ * Provide the RISC-V FCLASS instruction, which allows to figure out the kind of a given floating point number
  * (normal, subnormal, infinite, nan, ...)
  */
 class FpuClassPlugin(val layer : LaneLayer,

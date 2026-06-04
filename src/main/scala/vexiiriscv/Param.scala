@@ -531,7 +531,7 @@ class ParamSimple() {
     if(withRvc) withAlignerBuffer = true
   }
 
-  // Generate a human redable name from most of the supported configuration
+  // Generate a human readable name from most of the supported configuration
   def getName() : String = {
     def opt(that : Boolean, v : String) = that.mux(v, "")
     var isa = s"rv${xlen}"

@@ -22,7 +22,7 @@ object CsrFsm{
 }
 
 /**
- * Implements the RISC-V CSR read/write instructions, aswell as provide an API for other plugin to populate the CSR space.
+ * Implements the RISC-V CSR read/write instructions, as well as provide an API for other plugin to populate the CSR space.
  * In other words, this plugin do not define any CSR, but provide an API to define them (that API is defined in CsrService).
  *
  * To help with the FMax, CSR accesses are implemented by using a state-machine. Accesses are done over 4 cycles :
@@ -202,7 +202,7 @@ class CsrAccessPlugin(val layer : LaneLayer,
           bypass(Global.TRAP) := True
         }
 
-        // For timing reasons, avoinding trap to get long combinatorial path
+        // For timing reasons, avoiding trap to get long combinatorial path
         val sampled = RegNext(elp.isFreezed()) init(False)
         val trapReg = RegNext(trap)
         val busTrapReg = RegNext(bus.decode.trap)

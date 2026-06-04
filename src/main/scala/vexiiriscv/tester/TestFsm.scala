@@ -32,7 +32,7 @@ object FsmOption{
 
 /**
  * Provide a default implementation to be used in testbenches
- * Tasks are builded from a queue of landa function (To allow dual sim)
+ * Tasks are builded from a queue of lambda function (To allow dual sim)
  *
  * The testbench need to interface with putcQueue and tasks.head.getc
  */

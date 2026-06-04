@@ -36,7 +36,8 @@ trait FetchL1Service{
 
 /**
  * Implement and bind a instruction L1 cache to the CPU
- * The main particularity of this implementation is that the cache is non-blocking and canc onnect to  prefetching plugins
+ * The main particularity of this implementation is that the cache is 
+ * non-blocking and can connect to prefetching plugins.
  */
 class FetchL1Plugin(var translationStorageParameter: Any,
                     var translationPortParameter: Any,
