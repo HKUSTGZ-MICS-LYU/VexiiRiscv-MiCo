@@ -527,7 +527,7 @@ object RegressionSingle extends App{
           throw t;
         }
       }
-      FileUtils.forceDelete(f)
+      FileUtils.deleteQuietly(f)
     }
   }
 
@@ -557,4 +557,3 @@ object RegressionSingle extends App{
     case e : Throwable => System.exit(1)
   }
 }
-
