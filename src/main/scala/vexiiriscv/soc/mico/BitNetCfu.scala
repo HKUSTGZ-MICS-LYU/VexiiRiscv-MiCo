@@ -386,7 +386,7 @@ class BitNetCfu(cfuParam: CfuBusParameter,
         val lane = new BitQuantLane(quantLaneParam)
         lane.io
       } else {
-        val lane = new BitQuantNormalizedLane(quantLaneParam)
+        val lane = new BitQuantDivLane(quantLaneParam)
         lane.io
       }
     }

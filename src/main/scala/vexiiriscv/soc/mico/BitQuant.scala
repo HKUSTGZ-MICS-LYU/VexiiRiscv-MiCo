@@ -286,6 +286,186 @@ class BitQuantNormalizedLane(p: BitQuantLaneParameter) extends Component {
   io.result := resultReg
 }
 
+// ---------------------------------------------------------------------------
+// BitQuantDivLane — restoring-division Q8 quantizer with IEEE round-to-nearest
+//
+// Algorithm:
+//   Q = round( 127 * |X| / |A| )   where |X| ≤ |A|, Q ∈ [0, 127]
+//
+// Let Mx, Ma be 24-bit significands (with hidden 1), and Ediff = Ea - Ex ≥ 0.
+//   Dividend  = 127 * Mx  = (Mx << 7) - Mx         (31-bit)
+//   Divisor   = Ma << 7                              (31-bit, initial)
+//
+// Shift-and-subtract FSM (restoring division):
+//   FOR i = 7 DOWN TO Ediff-1  (total cycles = 9 - Ediff):
+//     IF Rem >= Divisor:  Rem -= Divisor;  Q = (Q << 1) | 1
+//     ELSE:               Q = (Q << 1) | 0
+//     Divisor >>= 1
+//
+//   Round_Bit = Q(0)   (last shifted-in bit, weight 0.5)
+//   Int_Bits  = Q >> 1  (integer part)
+//   Sticky    = (Rem != 0)
+//   Round to nearest, ties to even:
+//     IF Round_Bit AND (Sticky OR Int_Bits(0)): Int_Bits += 1
+//
+// Latency: 2–9 cycles depending on Ediff (average ~5.5).
+// Hardware: 1× 31b subtractor, 9b shift register, ~200 LUT — zero DSP.
+// ---------------------------------------------------------------------------
+class BitQuantDivLane(p: BitQuantLaneParameter) extends Component {
+  import BitQuantCompute._
+
+  val io = new BitQuantLaneIO(p)
+
+  // ---- state registers ----
+  val busyReg   = RegInit(False)
+  val doneReg   = RegInit(False)
+  val resultReg = Reg(Bits(p.maxQuantBits bits)) init(0)
+
+  // ---- data-path registers ----
+  val signReg         = RegInit(False)
+  val remReg          = Reg(UInt(31 bits)) init(0)   // remainder / partial dividend
+  val divisorReg      = Reg(UInt(31 bits)) init(0)   // current shifted divisor
+  val qReg            = Reg(UInt(9 bits)) init(0)    // quotient shift register (max 9 bits)
+  val cycleReg        = Reg(UInt(4 bits)) init(0)    // completed iterations
+  val totalCyclesReg  = Reg(UInt(4 bits)) init(0)    // 9 - Ediff, clamped
+
+  // ---- FP32 extraction (same as NormalizedLane) ----
+  val valueMagnitude   = io.value(30 downto 0).asUInt
+  val absValid         = io.absParts.valid
+  val valueNonZero     = valueMagnitude =/= 0
+  val valueSign        = io.value(31)
+  val valueExponent    = valueMagnitude(30 downto 23)
+  val valueFraction    = valueMagnitude(22 downto 0)
+
+  val valueEffectiveExponent = valueExponent.mux(
+    U(0, 8 bits) -> U(1, 8 bits),
+    default       -> valueExponent
+  )
+  val Mx = valueExponent.mux(
+    U(0, 8 bits) -> (B"0" ## valueFraction).asUInt,   // denormal
+    default       -> (B"1" ## valueFraction).asUInt    // normal
+  )
+  val Ma = io.absParts.significand   // 24-bit, pre-extracted with hidden bit
+
+  // ---- exponent difference ----
+  val Ediff      = (io.absParts.effectiveExponent.resize(9) - valueEffectiveExponent.resize(9)).resize(9)
+  val EdiffValid = io.absParts.effectiveExponent >= valueEffectiveExponent
+  val EdiffLarge = Ediff >= U(9, 9 bits)   // Ediff >= 9 → value too small, result = 0
+
+  // ---- dividend & divisor constants ----
+  val dividend       = ((Mx.resize(31) |<< 7) - Mx.resize(31)).resize(31)   // 127 * Mx
+  val initialDivisor = (Ma.resize(31) |<< 7).resize(31)                      // Ma << 7
+
+  // Total cycles = 9 - Ediff (clamped)
+  val totalCycles = Mux(
+    Ediff >= U(9, 9 bits),
+    U(0, 4 bits),
+    (U(9, 4 bits) - Ediff(3 downto 0)).resize(4)
+  )
+
+  // ---- Q2T fast path (reuses same logic as NormalizedLane) ----
+  val q2tExpPlusOne = valueEffectiveExponent.resize(9) + U(1, 9 bits)
+  val q2tAbsExp     = io.absParts.effectiveExponent.resize(9)
+  val q2tKeep =
+    absValid && valueNonZero &&
+    (q2tExpPlusOne > q2tAbsExp ||
+      (q2tExpPlusOne === q2tAbsExp && Mx >= Ma))
+  val q2tLevel  = U(1, p.maxQuantBits bits)
+  val q2tResult = valueSign.mux(
+    (U(0, p.maxQuantBits bits) - q2tLevel).asBits,
+    q2tLevel.asBits
+  )
+
+  // ---- IDLE → start ----
+  when(io.start && !busyReg) {
+    val modeQ8     = io.qBits > U(2, p.qBitsWidth bits)
+    // Saturate when value exponent > absmax exponent
+    val xGtAbs     = valueEffectiveExponent > io.absParts.effectiveExponent
+    val directZero = !absValid || !valueNonZero || (!EdiffValid && !xGtAbs) || EdiffLarge
+    val saturate   = !directZero && !EdiffValid && xGtAbs   // |X| > |A| → max code
+
+    doneReg   := True
+    busyReg   := False
+    signReg   := valueSign
+    remReg    := 0
+    divisorReg := 0
+    qReg      := 0
+    cycleReg  := 0
+    totalCyclesReg := 0
+    resultReg := 0
+
+    when(saturate) {
+      // |X| > |A| → max quantization level
+      val maxLevel = U((1 << (p.maxQuantBits - 1)) - 1, p.maxQuantBits bits)
+      resultReg := valueSign.mux(
+        (U(0, p.maxQuantBits bits) - maxLevel).asBits,
+        maxLevel.asBits
+      )
+    } otherwise {
+      when(!directZero) {
+        when(modeQ8) {
+          // Q8: enter restoring-division FSM
+          doneReg   := False
+          busyReg   := True
+          remReg    := dividend
+          divisorReg := initialDivisor
+          qReg      := 0
+          cycleReg  := 0
+          totalCyclesReg := totalCycles
+        } otherwise {
+          // Q2T: single-cycle
+          when(q2tKeep) {
+            resultReg := q2tResult
+          }
+        }
+      }
+    }
+  }
+
+  // ---- COMPUTE FSM (restoring division) ----
+  val canSubtract = remReg >= divisorReg
+  val subResult   = (remReg - divisorReg).resize(31)
+  val qShifted    = (qReg(7 downto 0) << 1).resize(9)
+  val qWithOne    = qShifted | U(1, 9 bits)
+
+  when(busyReg) {
+    when(cycleReg < totalCyclesReg) {
+      // ---- division step ----
+      when(canSubtract) {
+        remReg := subResult
+        qReg   := qWithOne
+      } otherwise {
+        qReg   := qShifted
+      }
+      divisorReg := (divisorReg |>> 1).resize(31)
+      cycleReg   := cycleReg + 1
+    } otherwise {
+      // ---- rounding stage ----
+      val roundBit  = qReg(0)
+      val intBits   = qReg(8 downto 1)          // 8-bit integer magnitude
+      val sticky    = remReg =/= 0
+      val tieToEven = roundBit && (sticky || intBits(0))
+      val finalQ    = UInt(8 bits)
+
+      finalQ := intBits.resize(8)
+      when(tieToEven) {
+        finalQ := (intBits + 1).resize(8)
+      }
+
+      busyReg := False
+      doneReg := True
+      resultReg := signReg.mux(
+        (U(0, p.maxQuantBits bits) - finalQ.resize(p.maxQuantBits)).asBits,
+        finalQ.resize(p.maxQuantBits).asBits
+      )
+    }
+  }
+
+  io.busy   := busyReg
+  io.done   := doneReg
+  io.result := resultReg
+}
+
 class BitQuantLevelShiftReg(width: Int, qBitsWidth: Int) extends Area {
   val clear = Bool()
   val loadQBits = UInt(qBitsWidth bits)

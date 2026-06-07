@@ -132,10 +132,15 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
     if(p.sparseMem){
       val sparseMemAt = 0x82000000l
       val sparseMemSize = 0x10000000l // 256MB by default
+      // Compute the actual CPU-side data width to match the sparse memory bus,
+      // avoiding unnecessary TileLink width adapters that can trigger
+      // "Stream valid persistence failed" assertions.
+      val lsuMemDataWidth = if (p.vexii.lsuL1Enable) p.vexii.lsuMemDataWidth else p.vexii.xlen
+      val cpuDataWidth = p.vexii.fetchMemDataWidth max lsuMemDataWidth
       mBus = new SlaveBus(
         M2sSupport(
           transfers = M2sTransfers.all,
-          dataWidth = 64,
+          dataWidth = cpuDataWidth,
           addressWidth = 32
         ),
         S2mParameters(Nil)
