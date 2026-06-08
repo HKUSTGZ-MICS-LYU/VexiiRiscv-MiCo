@@ -57,7 +57,7 @@ object Generate extends App {
   }
 }
 
-//Generates a tilelink version of VexiiRiscv verilog using command line arguments
+// Generates a tilelink version of VexiiRiscv verilog using command line arguments
 object GenerateTilelink extends App {
   val param = new ParamSimple()
   val sc = SpinalConfig()

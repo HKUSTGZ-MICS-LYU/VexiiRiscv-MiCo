@@ -66,9 +66,9 @@ trait TrapService extends Area{
   val trapLock = Retainer()
   val traps = ArrayBuffer[TrapSpec]()
 
-  //age => main priority, bigger win, meaning it a stage futher down the pipeline
-  //laneAge => On the same pipeline stage, specify at run time local age (in the stage over multiple lanes). smaller => win
-  //subAge => Static priority between trap ports with same age and same laneAge, bigger win
+  // age => main priority, bigger win, meaning it a stage further down the pipeline
+  // laneAge => On the same pipeline stage, specify at run time local age (in the stage over multiple lanes). smaller => win
+  // subAge => Static priority between trap ports with same age and same laneAge, bigger win
   def newTrap(age: Int, laneAgeWidth: Int, subAge : Int = 0): Flow[Trap] = {
     traps.addRet(TrapSpec(Flow(Trap(laneAgeWidth, true)), age, subAge)).bus
   }
@@ -109,7 +109,7 @@ object TrapArg{
  * Mainly, this plugin implement a state-machine which handle regular traps (interrupt/exception), but also a set of
  * special "hardware" trap used by the CPU to handle special cases as instruction retry/fences, MMU refill, ...
  *
- * Also, as VexiiRiscv implements a few large CSR directly into a sharder memory (mepc, mtvec, ...), the TrapPlugin state-machine handles
+ * Also, as VexiiRiscv implements a few large CSR directly into a shared memory (mepc, mtvec, ...), the TrapPlugin state-machine handles
  * the hardware read/write with those CSR (durring trap, mret, ...).
  */
 class TrapPlugin(val trapAt : Int) extends FiberPlugin with TrapService {
@@ -549,13 +549,13 @@ class TrapPlugin(val trapAt : Int) extends FiberPlugin with TrapService {
             }
           }
 
-          if(ats.mayNeedRedo) ATS_RSP.whenIsActive{
-            when(atsPorts.refill.rsp.valid){
+          if(ats.mayNeedRedo) ATS_RSP.whenIsActive {
+            when(atsPorts.refill.rsp.valid) {
               api.harts(hartId).redo := True
-              goto(JUMP) //improvment: shave one cycle
-              when(atsPorts.refill.rsp.pageFault || atsPorts.refill.rsp.accessFault){
+              goto(JUMP) // improvement: shave one cycle
+              when(atsPorts.refill.rsp.pageFault || atsPorts.refill.rsp.accessFault) {
                 pending.state.exception := True
-                switch(atsPorts.refill.rsp.accessFault ## pending.state.arg(1 downto 0)){
+                switch(atsPorts.refill.rsp.accessFault ## pending.state.arg(1 downto 0)) {
                   def add(k : Int, v : Int) = is(k){pending.state.code := v}
                   add(TrapArg.FETCH | 4, CSR.MCAUSE_ENUM.INSTRUCTION_ACCESS_FAULT)
                   add(TrapArg.LOAD  | 4, CSR.MCAUSE_ENUM.LOAD_ACCESS_FAULT)

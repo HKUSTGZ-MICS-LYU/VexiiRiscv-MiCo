@@ -83,7 +83,7 @@ class AesZknPlugin(
           zero(byteSel) := False
         }
 
-        //Finaly, mux the rom data
+        // Finally, mux the rom data
         for(byteId <- 0 to 3){
           output(byteId) := rom.bytes(sel(byteId))
           when(zero(byteId)){

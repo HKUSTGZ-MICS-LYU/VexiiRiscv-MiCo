@@ -53,7 +53,7 @@ import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 /**
- * Because VexiiRiscv implement PMA (Physical Memory Access) checking staticaly, we need to know what is mapped behind the litex memory busses.
+ * Because VexiiRiscv implement PMA (Physical Memory Access) checking statically, we need to know what is mapped behind the Litex memory busses.
  */
 case class LitexMemoryRegion(mapping : SizeMapping, mode : String, bus : String){
   def isExecutable = mode.contains("x")
@@ -138,8 +138,8 @@ class SocConfig(){
  * This is the VexiiRiscv SoC toplevel used with Litex.
  * - Based on tilelink for its memory interconnect
  * - Integrate the PLIC and CLINT peripherals
- * - Access the main memory through a dedicated AXI bus instead of the regular litex wishbone (for performance reasons)
- * - Can be multicore
+ * - Access the main memory through a dedicated AXI bus instead of the regular Litex wishbone (for performance reasons)
+ * - Can be multi-core
  * - Implement memory coherency between the code and a AXI DMA access bus
  * - Has an option L2 cache
  * - Supports JTAG debug
@@ -352,7 +352,7 @@ class Soc(c : SocConfig) extends Component {
       }
     }
 
-    // Implement a memory coherent AXI bus that the litex DMA's can use.
+    // Implement a memory coherent AXI bus that the Litex DMA's can use.
     val dma = c.withDma generate new ClockingArea(litexCd){
       val bus = slave(
         Axi4(
@@ -372,7 +372,7 @@ class Soc(c : SocConfig) extends Component {
       val filter = new fabric.TransferFilter()
       filter.up << bridge.down
 
-      //As litex reset will release before our one, we need to ensure that we don't eat a transaction
+      //As Litex reset will release before our one, we need to ensure that we don't eat a transaction
       Fiber build {
         bridge.read.get
         bridge.write.get
@@ -486,7 +486,7 @@ class Soc(c : SocConfig) extends Component {
       }
     }
 
-    // Fix up a few things, like additional pipelining, nameing and bridges.
+    // Fix up a few things, like additional pipelining, naming and bridges.
     val patcher = Fiber build new AreaRoot {
       val mBusAxi = withMem generate mem.toAxi4.down.expendId(8)
       val mBus = withMem generate Axi4SpecRenamer(master(
@@ -544,7 +544,7 @@ object blackboxPolicy extends MemBlackboxingPolicy{
   override def onUnblackboxable(topology: MemTopology, who: Any, message: String): Unit = generateUnblackboxableError(topology, who, message)
 }
 
-// Used by litex to generate the SoC verilog
+// Used by Litex to generate the SoC verilog
 object SocGen extends App{
   var netlistDirectory = "."
   var netlistName = "VexiiRiscvLitex"

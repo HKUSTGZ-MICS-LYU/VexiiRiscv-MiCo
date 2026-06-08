@@ -66,7 +66,7 @@ case class AddressTranslationInvalidationCmd() extends Bundle {
 }
 
 /**
- * Used by the TrapPlugin to ask the MmuPlugin to invalidate its TLB (on sfence.vma / satp updates)
+ * Used by the TrapPlugin to ask the MmuPlugin to invalidate its TLB (on SFENCE.VMA / SATP updates)
  */
 case class AddressTranslationInvalidation() extends Bundle {
   val cmd = Stream(AddressTranslationInvalidationCmd())

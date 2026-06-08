@@ -12,7 +12,7 @@ import scala.collection.mutable.ArrayBuffer
 
 /**
  * This plugin implement a dummy memory translation (for CPU without MMU).
- * That way, the plugins like the LSU/Fetch always have a MMU-like interface, which symplify their code.
+ * That way, the plugins like the LSU/Fetch always have a MMU-like interface, which simplify their code.
  */
 
 class StaticTranslationPlugin(var physicalWidth: Int) extends FiberPlugin with AddressTranslationService {

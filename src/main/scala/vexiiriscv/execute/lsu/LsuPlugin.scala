@@ -115,7 +115,7 @@ class LsuPlugin(var layer : LaneLayer,
     assert(!(storeBufferSlots != 0 ^ storeBufferOps != 0))
     val withStoreBuffer = storeBufferSlots != 0
 
-    // * Get reference to the concened plugins, as well as retains from of them from elaborating *
+    /* Get reference to the concerned plugins, as well as retains from of them from elaborating */
     val elp = host.find[ExecuteLanePlugin](_ == layer.lane)
     val ifp = host.find[IntFormatPlugin](_.lane == layer.lane)
     val srcp = host.find[SrcPlugin](_.layer == layer)
@@ -149,9 +149,9 @@ class LsuPlugin(var layer : LaneLayer,
     val trapPort = ts.newTrap(layer.lane.getExecuteAge(ctrlAt), Execute.LANE_AGE_WIDTH)
     val flushPort = ss.newFlushPort(layer.lane.getExecuteAge(ctrlAt), laneAgeWidth = Execute.LANE_AGE_WIDTH, withUopId = true)
     val frontend = new AguFrontend(layer, host, withRvcbm = withCbm)
-    val commitProbe = Flow(LsuCommitProbe()) // Used by the hardware prefetching plugin to learn about the software behaviour
+    val commitProbe = Flow(LsuCommitProbe()) // Used by the hardware prefetching plugin to learn about the software behavior
 
-    // Extends the instruction specifications done by the AGU with sign extentions and flush behaviour
+    // Extends the instruction specifications done by the AGU with sign extensions and flush behavior
     val iwb = ifp.access(wbAt)
     val amos = Riscv.RVA.get.option(frontend.amos.uops).toList.flatten
     for(load <- frontend.writingRf ++ amos){
@@ -440,7 +440,7 @@ class LsuPlugin(var layer : LaneLayer,
         port.storeId := storeId
       }
 
-      // Accesses comming from the MMU (in practice)
+      // Accesses coming from the MMU (in practice)
       val access = dbusAccesses.nonEmpty generate new Area {
         assert(dbusAccesses.size == 1)
         val waiter = new L1Waiter
@@ -461,7 +461,7 @@ class LsuPlugin(var layer : LaneLayer,
         host[DispatchPlugin].haltDispatchWhen(sbWaiter)
       }
 
-      // Accesses comming from the TrapPlugin (ex : fence.i)
+      // Accesses coming from the TrapPlugin (ex : fence.i)
       val flush = (flusher != null) generate new Area {
         val port = ports.addRet(Stream(LsuL1Cmd()))
         port.valid := flusher.isActive(flusher.CMD) && !flusher.cmdCounter.msb
@@ -479,7 +479,7 @@ class LsuPlugin(var layer : LaneLayer,
         }
       }
 
-      // Accesses comming from the hardware prefetcher
+      // Accesses coming from the hardware prefetcher
       val fromHp = hp.nonEmpty generate new Area {
         val feed = hp.get.io.get
         val port = ports.addRet(Stream(LsuL1Cmd()))
@@ -495,7 +495,7 @@ class LsuPlugin(var layer : LaneLayer,
         port.storeId := 0
       }
 
-      // Accesses comming from the store buffer which attempts to retry a failed store
+      // Accesses coming from the store buffer which attempts to retry a failed store
       val sb = withStoreBuffer generate new Area {
         val isHead = storeBuffer.pop.ptr === storeBuffer.ops.freePtr
         val flush = storeBuffer.waitL1.valid && !isHead
@@ -513,7 +513,7 @@ class LsuPlugin(var layer : LaneLayer,
         port.storeId := storeBuffer.pop.op.storeId
       }
 
-      // Let's arbitrate all those request and connect the atrbitred output to the pipeline / L1
+      // Let's arbitrate all those request and connect the arbitered output to the pipeline / L1
       val arbiter = StreamArbiterFactory().noLock.lowerFirst.buildOn(ports)
       arbiter.io.output.ready := !elp.isFreezed()
       l1.SEL := arbiter.io.output.valid
@@ -566,7 +566,7 @@ class LsuPlugin(var layer : LaneLayer,
       }
     }
 
-    // Pre compute a few things to reduce the combinatorial path presure on the ctrl stage.
+    // Pre compute a few things to reduce the combinatorial path pressure on the ctrl stage.
     val preCtrl = new elp.Execute(ctrlAt-1){
       val MISS_ALIGNED = insert((1 to log2Up(LSLEN / 8)).map(i => l1.SIZE === i && l1.MIXED_ADDRESS(i - 1 downto 0) =/= 0).orR)
       if(withCbm) MISS_ALIGNED clearWhen(l1.CLEAN || l1.INVALID)

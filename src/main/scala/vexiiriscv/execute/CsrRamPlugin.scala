@@ -14,7 +14,7 @@ import scala.collection.mutable.ArrayBuffer
 
 /**
  * Implement a RAM and provide an API (CsrRamService) that allows other plugins to :
- * - Staticaly allocate memory space
+ * - Statically allocate memory space
  * - Map the allocated memory space on the CPU CSR instruction
  * - Create new read/write access ports to the memory.
  *
