@@ -23,9 +23,12 @@ DEFAULT_OUT_ROOT = ROOT / "benchmark_results"
 class HardwarePreset:
     name: str
     enable_bncfu: bool
+    backend: str = "baseline"
     fpu: bool = True
     qtype: str = "1.5b"
     bitnet_quant: int = 3
+    bitnet_version: int = 32
+    use_simd: int = 32
     vlen: int = 256
     width: int = 128
     reg_depth: int = 3
@@ -35,41 +38,75 @@ class HardwarePreset:
     with_q2t: bool = False
     with_q8: bool = False
     pipe: bool = True
-    q8_compare_pipe: bool = True
+    q8_compare_pipe: bool = False
     quant_standard: bool = False
-    rf_sync: bool = False
+    rf_sync: bool = True
     sparse_mem_lat: int = 4
+    minimal_core: bool = False
     extra_sim_args: Tuple[str, ...] = ()
 
     @property
     def march(self) -> str:
-        return "rv32imafc_zifencei" if self.fpu else "rv32imac_zifencei"
+        return "rv32imafc_zifencei" if self.fpu else "rv32imac_zicsr_zifencei"
 
     @property
     def sim_args(self) -> List[str]:
-        args = [
-            "--with-rvc",
-            "--with-rvm",
-            "--decoders", "2",
-            "--lanes", "2",
-            "--with-aligner-buffer",
-            "--with-dispatcher-buffer",
-            "--with-ras",
-            "--with-btb",
-            "--with-gshare",
-            "--with-late-alu",
-            "--regfile-async",
-            "--fetch-l1",
-            "--fetch-l1-ways", "2",
-            "--lsu-l1",
-            "--lsu-l1-ways", "2",
-            "--allow-bypass-from", "0",
-            "--div-radix", "4",
-            "--sparse-mem",
-            "--sparse-mem-lat", str(self.sparse_mem_lat),
-        ]
+        if self.minimal_core:
+            args = [
+                "--with-rvc",
+                "--with-rvm",
+                "--with-btb",
+                "--with-late-alu",
+                "--regfile-async",
+                "--allow-bypass-from", "0",
+                "--div-radix", "4",
+                "--sparse-mem",
+                "--sparse-mem-lat", str(self.sparse_mem_lat),
+            ]
+        else:
+            args = [
+                "--with-rvc",
+                "--with-rvm",
+                "--decoders", "2",
+                "--lanes", "2",
+                "--with-aligner-buffer",
+                "--with-dispatcher-buffer",
+                "--with-ras",
+                "--with-btb",
+                "--with-gshare",
+                "--with-late-alu",
+                "--regfile-async",
+                "--fetch-l1",
+                "--fetch-l1-ways", "2",
+                "--lsu-l1",
+                "--lsu-l1-ways", "2",
+                "--allow-bypass-from", "0",
+                "--div-radix", "4",
+                "--sparse-mem",
+                "--sparse-mem-lat", str(self.sparse_mem_lat),
+            ]
         if self.fpu:
             args.append("--with-rvf")
+        if self.backend == "bnrv":
+            args += [
+                "--bitnet",
+                "--bitnet-qtype", self.qtype,
+                "--bitnet-version", str(self.bitnet_version),
+            ]
+        if self.backend == "mico":
+            args += [
+                "--mico",
+                "--mico-width", str(self.use_simd),
+            ]
+        if self.backend == "cfuvpu":
+            args += [
+                "--mico-vpu",
+                "--mico-vpu-len", str(self.vlen),
+                "--mico-vpu-width", str(self.width),
+                "--mico-vpu-bus-width", str(self.bus_width),
+            ]
+            if self.pipe:
+                args.append("--mico-vpu-pipe")
         if self.enable_bncfu:
             args += [
                 "--mico-bitnet-cfu",
@@ -172,6 +209,31 @@ def hardware_presets(name: str) -> List[HardwarePreset]:
                 pipe=True,
             ),
         ]
+    if name == "sync_rf":
+        return [
+            HardwarePreset(
+                "bncfu_256_sync",
+                vlen=256,
+                width=128,
+                quant_width=64,
+                enable_bncfu=True,
+                with_q2t=True,
+                with_q8=True,
+                pipe=True,
+                rf_sync=True,
+            ),
+            HardwarePreset(
+                "bncfu_512_sync",
+                vlen=512,
+                width=256,
+                quant_width=128,
+                enable_bncfu=True,
+                with_q2t=True,
+                with_q8=True,
+                pipe=True,
+                rf_sync=True,
+            ),
+        ]
     if name == "width":
         return [
             HardwarePreset("baseline_fpu", enable_bncfu=False),
@@ -179,6 +241,146 @@ def hardware_presets(name: str) -> List[HardwarePreset]:
             HardwarePreset("bncfu_v256_w64", enable_bncfu=True, vlen=256, width=64, quant_width=128, with_q2t=True, with_q8=True, pipe=True, q8_compare_pipe=True),
             HardwarePreset("bncfu_v256_w128", enable_bncfu=True, vlen=256, width=128, quant_width=128, with_q2t=True, with_q8=True, pipe=True, q8_compare_pipe=True),
             HardwarePreset("bncfu_v512_w128", enable_bncfu=True, vlen=512, width=128, quant_width=128, with_q2t=True, with_q8=True, pipe=True, q8_compare_pipe=True),
+        ]
+    if name == "ablation_large":
+        return [
+            HardwarePreset("baseline_fpu", enable_bncfu=False),
+            HardwarePreset(
+                "bncfu_256_noquant",
+                enable_bncfu=True,
+                vlen=256,
+                width=128,
+                quant_width=64,
+                with_q2t=False,
+                with_q8=False,
+                pipe=True,
+                q8_compare_pipe=False,
+            ),
+            HardwarePreset(
+                "bncfu_256_quant64",
+                enable_bncfu=True,
+                vlen=256,
+                width=128,
+                quant_width=64,
+                with_q2t=True,
+                with_q8=True,
+                pipe=True,
+                q8_compare_pipe=False,
+            ),
+        ]
+    if name == "ablation_small":
+        return [
+            HardwarePreset("baseline_nofpu_nocache", enable_bncfu=False, fpu=False, minimal_core=True),
+            HardwarePreset(
+                "bncfu_256_noquant_nofpu_nocache",
+                enable_bncfu=True,
+                fpu=False,
+                minimal_core=True,
+                vlen=256,
+                width=128,
+                quant_width=64,
+                with_q2t=False,
+                with_q8=False,
+                pipe=True,
+                q8_compare_pipe=False,
+            ),
+            HardwarePreset(
+                "bncfu_256_quant64_nofpu_nocache",
+                enable_bncfu=True,
+                fpu=False,
+                minimal_core=True,
+                vlen=256,
+                width=128,
+                quant_width=64,
+                with_q2t=True,
+                with_q8=True,
+                pipe=True,
+                q8_compare_pipe=False,
+            ),
+        ]
+    if name == "cross_hw_large":
+        return [
+            HardwarePreset(
+                "bncfu_256_quant64",
+                backend="bncfu",
+                enable_bncfu=True,
+                vlen=256,
+                width=128,
+                quant_width=64,
+                with_q2t=True,
+                with_q8=True,
+                pipe=True,
+                q8_compare_pipe=False,
+            ),
+            HardwarePreset(
+                "bnrv_32",
+                backend="bnrv",
+                enable_bncfu=False,
+                use_simd=32,
+                bitnet_version=32,
+                bitnet_quant=3,
+            ),
+            HardwarePreset(
+                "mico_32",
+                backend="mico",
+                enable_bncfu=False,
+                use_simd=32,
+            ),
+            HardwarePreset(
+                "cfuvpu_256",
+                backend="cfuvpu",
+                enable_bncfu=False,
+                vlen=256,
+                width=128,
+                bus_width=64,
+                pipe=True,
+            ),
+        ]
+    if name == "cross_hw_small":
+        return [
+            HardwarePreset(
+                "bncfu_256_quant64_nofpu_nocache",
+                backend="bncfu",
+                enable_bncfu=True,
+                fpu=False,
+                minimal_core=True,
+                vlen=256,
+                width=128,
+                quant_width=64,
+                with_q2t=True,
+                with_q8=True,
+                pipe=True,
+                q8_compare_pipe=False,
+            ),
+            HardwarePreset(
+                "bnrv_32_nofpu_nocache",
+                backend="bnrv",
+                enable_bncfu=False,
+                fpu=False,
+                minimal_core=True,
+                use_simd=32,
+                bitnet_version=32,
+                bitnet_quant=3,
+            ),
+            HardwarePreset(
+                "mico_32_nofpu_nocache",
+                backend="mico",
+                enable_bncfu=False,
+                fpu=False,
+                minimal_core=True,
+                use_simd=32,
+            ),
+            HardwarePreset(
+                "cfuvpu_256_nofpu_nocache",
+                backend="cfuvpu",
+                enable_bncfu=False,
+                fpu=False,
+                minimal_core=True,
+                vlen=256,
+                width=128,
+                bus_width=64,
+                pipe=True,
+            ),
         ]
     raise SystemExit(f"Unknown hardware preset set: {name}")
 
@@ -225,7 +427,7 @@ def benchmark_cases(name: str) -> List[BenchmarkCase]:
             main="tests/q2t_quant_test",
             baseline_opt="",
             bncfu_opt="bncfu",
-            extra_cflags=(f"-DQ2T_CUSTOM_N={n}",),
+            extra_cflags=(f"-DQUANT_CUSTOM_N={n}",),
             notes="Q2T quantization vector-length sweep.",
         )
 
@@ -236,7 +438,7 @@ def benchmark_cases(name: str) -> List[BenchmarkCase]:
             main="tests/q8_quant_test",
             baseline_opt="",
             bncfu_opt="bncfu",
-            extra_cflags=(f"-DQ8_CUSTOM_N={n}",),
+            extra_cflags=(f"-DQUANT_CUSTOM_N={n}",),
             notes="Q8 quantization vector-length sweep.",
         )
 
@@ -312,6 +514,10 @@ def matmul_shape_arg(text: str) -> Tuple[int, int, int]:
     return parse_int_tuple(text, 3, "matmul shape")  # N,M,K
 
 
+def llama_shape_arg(text: str) -> Tuple[int, int, int, int, int]:
+    return parse_int_tuple(text, 5, "llama shape")  # SEQ,N_HEADS,N_KV_HEADS,HEAD_SIZE,POS
+
+
 def positive_int_arg(text: str) -> int:
     try:
         value = int(text, 0)
@@ -366,7 +572,7 @@ def custom_benchmark_cases(args: argparse.Namespace) -> List[BenchmarkCase]:
             main="tests/q2t_quant_test",
             baseline_opt="",
             bncfu_opt="bncfu",
-            extra_cflags=(f"-DQ2T_CUSTOM_N={n}",),
+            extra_cflags=(f"-DQUANT_CUSTOM_N={n}",),
             notes="User-specified Q2T quant vector length.",
         ))
 
@@ -377,7 +583,7 @@ def custom_benchmark_cases(args: argparse.Namespace) -> List[BenchmarkCase]:
             main="tests/q8_quant_test",
             baseline_opt="",
             bncfu_opt="bncfu",
-            extra_cflags=(f"-DQ8_CUSTOM_N={n}",),
+            extra_cflags=(f"-DQUANT_CUSTOM_N={n}",),
             notes="User-specified Q8 quant vector length.",
         ))
 
@@ -399,6 +605,26 @@ def custom_benchmark_cases(args: argparse.Namespace) -> List[BenchmarkCase]:
             bncfu_opt="bncfu",
             extra_cflags=(f"-DQUANT_CUSTOM_N={n}",),
             notes="User-specified shared quant vector length.",
+        ))
+
+    for seq, heads, kv_heads, head_size, pos in args.llama_shape or []:
+        cases.append(BenchmarkCase(
+            name=f"llama_groupwise_s{seq}_h{heads}_kv{kv_heads}_d{head_size}_p{pos}",
+            family="llama_groupwise",
+            main="tests/llama_groupwise_kivi_attention_comp",
+            baseline_opt="",
+            bncfu_opt="bncfu",
+            extra_cflags=(
+                f"-DLLAMA_ATT_SEQ={seq}",
+                f"-DLLAMA_ATT_HEADS={heads}",
+                f"-DLLAMA_ATT_KV_HEADS={kv_heads}",
+                f"-DLLAMA_ATT_HEAD_SIZE={head_size}",
+                f"-DLLAMA_ATT_BENCH_POS={pos}",
+                f"-DLLAMA_ATT_REPEATS={args.llama_repeats}",
+                "-DLLAMA_ATT_SKIP_NUMERIC",
+                "-DKIVI_PROFILE_INTERNAL",
+            ),
+            notes="User-specified LLaMa groupwise attention operator case.",
         ))
 
     return cases
@@ -512,6 +738,7 @@ def parse_log(hw: HardwarePreset, bench: BenchmarkCase, log_path: Path, rc: int)
         "pipe": hw.pipe,
         "q8_compare_pipe": hw.q8_compare_pipe,
         "quant_standard": hw.quant_standard,
+        "rf_sync": hw.rf_sync if hw.enable_bncfu else "",
         "march": hw.march,
         "sim_rc": rc,
         "log": log_name,
@@ -542,6 +769,41 @@ def parse_log(hw: HardwarePreset, bench: BenchmarkCase, log_path: Path, rc: int)
             timers = [int(x) for x in re.findall(r"ATTN_TIMER:\s*(\d+)", text)]
             if timers:
                 rows.append({**common, "metric": "attn_timer", "cycles": timers[-1]})
+    elif bench.family == "llama_groupwise":
+        shape = re.search(r"Shape: seq=(\d+) n_heads=(\d+) n_kv_heads=(\d+) head_size=(\d+) kv_mul=(\d+) group_size=(\d+)", text)
+        if shape:
+            common.update({
+                "seq": int(shape.group(1)),
+                "n_heads": int(shape.group(2)),
+                "n_kv_heads": int(shape.group(3)),
+                "head_size": int(shape.group(4)),
+                "kv_mul": int(shape.group(5)),
+                "group_size": int(shape.group(6)),
+            })
+        bench_cfg = re.search(r"Benchmark: pos=(-?\d+) repeats=(\d+) skip_numeric=(\d+)", text)
+        if bench_cfg:
+            common.update({
+                "pos": int(bench_cfg.group(1)),
+                "repeats": int(bench_cfg.group(2)),
+                "skip_numeric": bool(int(bench_cfg.group(3))),
+            })
+        m = re.search(r"LLAMA_KIVI_SPEED ref_total=(\d+) kivi_total=(\d+) ref_attn=(\d+) kivi_attn=(\d+) speedup=([0-9.]+) speedup_milli=(\d+) faster=(\d+)", text)
+        if m:
+            ref_total, kivi_total, ref_attn, kivi_attn, speedup, speedup_milli, faster = m.groups()
+            rows.append({
+                **common,
+                "metric": "llama_kivi_attn",
+                "cycles": int(kivi_attn),
+                "total_cycles": int(kivi_total),
+                "ref_attn_cycles": int(ref_attn),
+                "ref_total_cycles": int(ref_total),
+                "internal_speedup": int(speedup_milli) / 1000.0,
+                "faster_than_fp32": bool(int(faster)),
+            })
+        if not rows:
+            timers = [int(x) for x in re.findall(r"ATTN_TIMER:\s*(\d+)", text)]
+            if timers:
+                rows.append({**common, "metric": "llama_attn_timer", "cycles": timers[-1]})
     elif bench.family == "matmul":
         for m in re.finditer(r"TIME (Q\d+x\d+) N=(\d+) M=(\d+) K=(\d+) cycles=(\d+)", text):
             op, n, mm, k, cycles = m.groups()
@@ -633,7 +895,7 @@ def write_summary(rows: List[Dict[str, object]], path: Path) -> None:
     ]
     for row in rows:
         shape_parts = []
-        for key in ("B", "H", "I", "J", "F", "N", "M", "K", "n"):
+        for key in ("B", "H", "I", "J", "F", "N", "M", "K", "n", "seq", "n_heads", "n_kv_heads", "head_size", "pos"):
             if row.get(key) not in (None, ""):
                 shape_parts.append(f"{key}={row[key]}")
         lines.append(
@@ -693,7 +955,11 @@ def plot(rows: List[Dict[str, object]], out_dir: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build, simulate, and compare BNCFU software benchmark performance across hardware presets.")
-    parser.add_argument("--hardware-preset", default="standard", choices=["smoke", "standard", "width"])
+    parser.add_argument(
+        "--hardware-preset",
+        default="standard",
+        choices=["smoke", "standard", "sync_rf", "width", "ablation_large", "ablation_small"],
+    )
     parser.add_argument("--bench-suite", default="standard", choices=["smoke", "standard", "full"])
     parser.add_argument("--out-dir", type=Path, help="Output directory. Defaults to benchmark_results/bncfu_perf_<timestamp>.")
     parser.add_argument("--only-hardware", action="append", help="Run only the named hardware preset. Can be repeated.")
@@ -710,6 +976,8 @@ def main() -> None:
     parser.add_argument("--q2t-size", action="append", type=positive_int_arg, metavar="N", help="Add a custom q2t_quant_test vector length.")
     parser.add_argument("--q8-size", action="append", type=positive_int_arg, metavar="N", help="Add a custom q8_quant_test vector length.")
     parser.add_argument("--quant-size", action="append", type=positive_int_arg, metavar="N", help="Add both Q2T and Q8 custom quant vector lengths.")
+    parser.add_argument("--llama-shape", action="append", type=llama_shape_arg, metavar="SEQ,H,KVH,D,POS", help="Add a custom llama_groupwise_kivi_attention_comp case.")
+    parser.add_argument("--llama-repeats", type=positive_int_arg, default=1, help="Repeats for custom --llama-shape cases.")
     parser.add_argument("--custom-only", action="store_true", help="Run only benchmark cases generated by --attention-shape/--matmul-shape/--q2t-size/--q8-size/--quant-size.")
     args = parser.parse_args()
 

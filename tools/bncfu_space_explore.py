@@ -36,7 +36,7 @@ class Config:
     quant_width: int = 0
     q8_compare_pipe: bool = False
     quant_standard: bool = False
-    rf_sync: bool = False
+    rf_sync: bool = True
     stress: bool = False
     extra_args: List[str] = field(default_factory=list)
 
