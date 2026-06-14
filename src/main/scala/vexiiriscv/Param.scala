@@ -575,6 +575,7 @@ class ParamSimple() {
   def withRvZbs = checkISA("zbs")
   def withRvb = checkISA("zba", "zbb", "zbc", "zbs")
   def withSscofpmf = checkISA("sscofpmf")
+  def withShlcofideleg = checkISA("shlcofideleg")
   def withSstc = checkISA("sstc")
   def withSxaia = checkISA("smaia") || checkISA("ssaia")
   def withSscsrind = checkISA("sscsrind")
@@ -1175,7 +1176,8 @@ class ParamSimple() {
     if(withPerformanceCounters) plugins += new PerformanceCounterPlugin(
       additionalCounterCount  = additionalPerformanceCounters,
       withSmcntrpmf           = withSmcntrpmf,
-      withScountovf           = withSscofpmf
+      withScountovf           = withSscofpmf,
+      withShlcofideleg        = withShlcofideleg
     )
     plugins += new CsrAccessPlugin(early0, writeBackKey =  if(lanes == 1) "lane0" else "lane1")
     if(withIndirectCsr) plugins += new IndirectCsrPlugin(withSscsrind, privParam.withHypervisor && withSscsrind)

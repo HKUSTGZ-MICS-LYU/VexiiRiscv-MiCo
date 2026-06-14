@@ -19,7 +19,8 @@ import scala.collection.mutable.ArrayBuffer
 class PerformanceCounterPlugin(var additionalCounterCount : Int,
                                var bufferWidth : Int = 8,
                                var withSmcntrpmf : Boolean = true,
-                               var withScountovf : Boolean = true) extends FiberPlugin with PerformanceCounterService{
+                               var withScountovf : Boolean = true,
+                               var withShlcofideleg : Boolean = false) extends FiberPlugin with PerformanceCounterService{
   def counterCount = 2 + additionalCounterCount
 
   case class Spec(id : Int, event : Bool)
@@ -165,8 +166,36 @@ class PerformanceCounterPlugin(var additionalCounterCount : Int,
         csr.read(CSR.SIE, 13 -> (ie & deleg))
         csr.writeWhen(ie, deleg, CSR.SIE, 13)
       }
+
+      val vs = (priv.implementHypervisor && withShlcofideleg) generate new Area {
+        val deleg = RegInit(False)
+        val active = sup.deleg && deleg
+
+        if(withShlcofideleg && withScountovf) {
+          deleg clearWhen(!sup.deleg)
+          csr.read(sup.deleg && deleg, CSR.HIDELEG, 13)
+          csr.writeWhen(deleg, sup.deleg, CSR.HIDELEG, 13)
+        }
+
+        csr.read(ip && active, CSR.VSIP, 13)
+        csr.writeWhen(ip, active, CSR.VSIP, 13)
+        csr.read(ie && active, CSR.VSIE, 13)
+        csr.writeWhen(ie, active, CSR.VSIE, 13)
+
+        priv.logic.harts(0).spec.addInterrupt(
+          ip && ie && active,
+          id = 13,
+          privilege = PrivilegeMode.VS,
+          delegators = List(
+            Delegator(True, PrivilegeMode.M),
+            Delegator(True, PrivilegeMode.S)
+          )
+        )
+      }
+      val nonGuestMode = (priv.implementHypervisor && withShlcofideleg).mux(!vs.active, True)
+
       priv.logic.harts(0).spec.addInterrupt(
-        ip && ie,
+        ip && ie && nonGuestMode,
         id = 13,
         privilege = priv.implementSupervisor.mux(PrivilegeMode.S, PrivilegeMode.M),
         delegators = priv.implementSupervisor.mux(List(Delegator(sup.deleg, PrivilegeMode.M)), Nil)
