@@ -132,6 +132,7 @@ class CsrAccessPlugin(val layer : LaneLayer,
         val rdPhys = rd.PHYS()
         val rdEnable = Bool()
         val fire = False
+        val csrId = Reg(UInt(12 bits))
       }
 
       def csrAddressFix(csrId: UInt): UInt = {
@@ -196,6 +197,7 @@ class CsrAccessPlugin(val layer : LaneLayer,
         interface.doClear := CSR_CLEAR
         interface.rdEnable := up(rd.ENABLE)
         interface.rdPhys := rd.PHYS
+        interface.csrId := csrAddress
 
         val freeze = isValid && SEL && !unfreeze
         elp.freezeWhen(freeze)
@@ -265,7 +267,7 @@ class CsrAccessPlugin(val layer : LaneLayer,
         val onReadsDo = False
         val onReadsFireDo = False
         bus.read.valid := onReadsDo
-        bus.read.address := U(interface.uop(Const.csrRange))
+        bus.read.address := interface.csrId
 
         bus.read.moving := !bus.read.halt //TODO || eu.getExecute(0).isFlushed
 
@@ -340,7 +342,7 @@ class CsrAccessPlugin(val layer : LaneLayer,
 
         interface.onWriteBits := alu.result
         bus.write.bits := alu.result
-        bus.write.address := U(interface.uop(Const.csrRange))
+        bus.write.address := interface.csrId
 
         val onWritesDo = False
         val onWritesFireDo = False
