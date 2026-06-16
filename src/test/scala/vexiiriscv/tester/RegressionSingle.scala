@@ -546,6 +546,14 @@ object RegressionSingle extends App{
       opt[Unit]("with-rvls-log") action { (v, c) => config.traceRvlsLog = true }
       opt[Unit]("with-spike-log") action { (v, c) => config.traceSpikeLog = true }
       opt[Unit]("trace-all") action { (v, c) => config.traceRvlsLog = true; config.traceKonata = true; config.traceWave = true; config.traceSpikeLog = true }
+      opt[Unit]("without-all-tests") action { (v, c) => config.disableAll() }
+      opt[Unit]("without-riscv-tests") action { (v, c) => config.riscvTest = false }
+      opt[Unit]("without-riscv-arch-tests") action { (v, c) => config.riscvArchTest = false }
+      opt[Unit]("without-buildroot-tests") action { (v, c) => config.buildroot = false }
+      opt[Unit]("without-regular-tests") action { (v, c) => config.regular = false }
+      opt[Unit]("without-benchmark-tests") action { (v, c) => config.benchmark = false  }
+      opt[Int]("with-free-rtos-tests-count") action { (v, c) => config.freertosCount = v }
+      opt[Unit]("without-jtag-tests") action { (v, c) => config.jtag = false }
       param.addOptions(this)
     }.parse(args, ()).nonEmpty)
     test(param, args, config.fromEnv())
