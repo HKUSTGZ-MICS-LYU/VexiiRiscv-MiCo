@@ -846,15 +846,17 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
       }
 
       def genImsicArea(ireg: Int, topei: Int, provider: (Int, Int) => CsrCondFilter) = new Area {
-        val file = ImsicFile(hartIds(hartId), 1 until p.imsicInterrupts)
+        val file = ImsicFile(hartIds(hartId), p.imsicInterrupts)
         val identity = file.identity
-        val triggers = in(file.triggers)
+        val trigger = slave(cloneOf(file.trigger))
+
+        file.trigger << trigger
 
         api.readWrite(file.threshold, provider(IndirectCSR.eithreshold, ireg))
 
         val sources = for (interrupt <- file.interrupts) yield new Area {
           val id = interrupt.id
-          val offset = id / XLEN * (1 + (XLEN == 64).toInt)
+          val offset = id / XLEN * (1 + (XLEN.get == 64).toInt)
 
           api.readWrite(interrupt.ie, provider(IndirectCSR.eie0 + offset, ireg), id % XLEN)
           api.readWrite(interrupt.ip, provider(IndirectCSR.eip0 + offset, ireg), id % XLEN)
