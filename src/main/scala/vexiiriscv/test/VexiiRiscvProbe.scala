@@ -220,6 +220,7 @@ class VexiiRiscvProbe(cpu : VexiiRiscv, kb : Option[konata.Backend], var withRvl
         if (get(Riscv.RVZbb)) isa += "_zbb"
         if (get(Riscv.RVZbc)) isa += "_zbc"
         if (get(Riscv.RVZbs)) isa += "_zbs"
+        if (get(Riscv.RVZcbm)) isa += "_zicbom"
         if (cpu.host.get[PrivilegedPlugin].exists(_.p.withRdTime)) isa += "_zicntr"
         if (cpu.host.get[PerformanceCounterPlugin].nonEmpty) isa += "_zihpm"
         tracer.newCpuMemoryView(hartId, 16, 1 << Decode.STORE_ID_WIDTH)
