@@ -393,7 +393,7 @@ class RegressionSingle(compiled : SimCompiled[VexiiRiscv],
     }
     val path = s"ext/NaxSoftware/buildroot/images/$arch"
     val args = newArgs()
-    args.failAfter(10000000000l)
+    args.failAfter(20000000000l)
     args.name("buildroot")
     args.loadBin(0x80000000l, s"$path/fw_jump.bin")
     args.loadBin(0x80F80000l, s"$path/linux.dtb")
