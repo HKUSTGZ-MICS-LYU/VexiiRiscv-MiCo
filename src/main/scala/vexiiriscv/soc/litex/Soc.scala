@@ -100,6 +100,9 @@ class SocConfig(){
     "imsic_s" -> 0xF1200000l,
   )
 
+  def dmaAddressWidth = if(vexiiParam.physicalWidth <= 32) 32 else 64
+  def externalAddressWidth = if(withDma) dmaAddressWidth else vexiiParam.physicalWidth
+
   def addOptions(parser: scopt.OptionParser[Unit]): Unit = {
     import parser._
     vexiiParam.addOptions(parser)
@@ -357,7 +360,7 @@ class Soc(c : SocConfig) extends Component {
       val bus = slave(
         Axi4(
           Axi4Config(
-            addressWidth = 32,
+            addressWidth = dmaAddressWidth,
             dataWidth = mainDataWidth,
             idWidth = 4
           )
@@ -588,16 +591,18 @@ object SocGen extends App{
  * and propagate them to the python environnement by generating some sort of python "header"
  */
 object PythonArgsGen extends App{
-  val vexiiParam = new ParamSimple()
+  val socConfig = new SocConfig()
+  val vexiiParam = socConfig.vexiiParam
   import vexiiParam._
   var pythonPath ="miaou.py"
   assert(new scopt.OptionParser[Unit]("Vexii") {
     help("help").text("prints this usage text")
-    vexiiParam.addOptions(this)
-    opt[Boolean]("debug-sysbus") action { (v, c) =>  }
+    socConfig.addOptions(this)
     opt[String]("python-file") action { (v, c) => pythonPath = v }
 
   }.parse(args, ()).nonEmpty)
+
+  vexiiParam.lsuL1Coherency = socConfig.cpuCount > 1 || socConfig.withDma
 
   import java.io.PrintWriter
 
@@ -614,6 +619,13 @@ object PythonArgsGen extends App{
          |VexiiRiscv.with_lsu_software_prefetch = ${lsuSoftwarePrefetch.toInt}
          |VexiiRiscv.with_lsu_hardware_prefetch = "${lsuHardwarePrefetch}"
          |VexiiRiscv.internal_bus_width = ${memDataWidth}
+         |VexiiRiscv.pbus_address_width = ${socConfig.externalAddressWidth}
+         |VexiiRiscv.pbus_data_width = ${if(socConfig.axiLiteForce32) 32 else xlen}
+         |VexiiRiscv.mbus_address_width = ${socConfig.externalAddressWidth}
+         |VexiiRiscv.mbus_id_width = 8
+         |VexiiRiscv.dma_address_width = ${socConfig.dmaAddressWidth}
+         |VexiiRiscv.dma_data_width = ${memDataWidth}
+         |VexiiRiscv.dma_id_width = 4
          |""".stripMargin)
     close()
   }
