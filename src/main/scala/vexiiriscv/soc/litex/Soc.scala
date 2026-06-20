@@ -604,18 +604,15 @@ object PythonArgsGen extends App{
 
   vexiiParam.lsuL1Coherency = socConfig.cpuCount > 1 || socConfig.withDma
 
+  val isaMap = withISA.map(s => s"'$s'").mkString("{", ", ", "}")
+
   import java.io.PrintWriter
 
   new PrintWriter(pythonPath) {
     write(
       s"""
          |VexiiRiscv.xlen = $xlen
-         |VexiiRiscv.with_rvm = ${(withMul && withDiv).toInt}
-         |VexiiRiscv.with_rva = ${withRva.toInt}
-         |VexiiRiscv.with_rvf = ${withRvf.toInt}
-         |VexiiRiscv.with_rvd = ${withRvd.toInt}
-         |VexiiRiscv.with_rvc = ${withRvc.toInt}
-         |VexiiRiscv.with_rvcbom = ${withRvcbm.toInt}
+         |VexiiRiscv.isa_map = ${isaMap}
          |VexiiRiscv.with_lsu_software_prefetch = ${lsuSoftwarePrefetch.toInt}
          |VexiiRiscv.with_lsu_hardware_prefetch = "${lsuHardwarePrefetch}"
          |VexiiRiscv.internal_bus_width = ${memDataWidth}
