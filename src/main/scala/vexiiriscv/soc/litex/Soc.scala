@@ -465,7 +465,8 @@ class Soc(c : SocConfig) extends Component {
           case p : LsuPlugin if p.withLlcFlush => p
         })
         assert(llcLsuPlugins.isEmpty || withL2, "Hub-only coherent Zicbom is unsupported; enable L2 so CBO can use the coherent CacheFiber FlushBus.")
-        val flushParam = llcLsuPlugins.nonEmpty generate FlushParam(vexiiParam.physicalWidth, log2Up(llcLsuPlugins.size))
+        val llcFlushAddressWidth = vexiiParam.xlen max vexiiParam.physicalWidth
+        val flushParam = llcLsuPlugins.nonEmpty generate FlushParam(llcFlushAddressWidth, log2Up(llcLsuPlugins.size))
 
         val hub = (withCoherency && !withL2) generate new Area {
           val hub = new HubFiber()
