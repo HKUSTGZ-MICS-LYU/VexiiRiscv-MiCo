@@ -1023,7 +1023,8 @@ class ParamSimple() {
     if(!lsuL1Enable) {
       plugins += new LsuCachelessPlugin(
         layer     = early0,
-        withAmo   = extension.withRva,
+        withZaamo = extension.withZaamo,
+        withZalrsc = extension.withZalrsc,
         withSpeculativeLoadFlush = true,
         timingParameter = extension.withRvh match {
           case true => lsuCachelessHypervisorTiming
@@ -1050,7 +1051,8 @@ class ParamSimple() {
           case false => lsuTiming
         },
         layer = early0,
-        withRva = extension.withRva,
+        withZaamo = extension.withZaamo,
+        withZalrsc = extension.withZalrsc,
         storeRs2At = storeRs2Late.mux(2, 0),
         storeBufferSlots = lsuStoreBufferSlots,
         storeBufferOps = lsuStoreBufferOps,

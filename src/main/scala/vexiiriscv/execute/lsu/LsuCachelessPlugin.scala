@@ -48,7 +48,8 @@ case class LsuCachelessTimingParameter(var addressAt: Int = 0,
   * are stressed, but as this only impact the data path (no control path), it seems to be generally better.
   */
 class LsuCachelessPlugin(var layer : LaneLayer,
-                         var withAmo : Boolean,
+                         var withZaamo : Boolean,
+                         var withZalrsc : Boolean,
                          // WARNING, the fork cmd may be flushed out of existence before firing if
                          // any plugin doesn't flush from the first cycle after !freeze.
                          var withSpeculativeLoadFlush : Boolean,
@@ -63,13 +64,14 @@ class LsuCachelessPlugin(var layer : LaneLayer,
   override def accessWake: Bits = B(0)
   override def getLsuCachelessBus(): LsuCachelessBus = logic.bus
 
+  def withAtomics = withZaamo || withZalrsc
   def bufferSize = joinAt - forkAt + 1
   def busParam = LsuCachelessBusParam(
     addressWidth = Global.PHYSICAL_WIDTH,
     dataWidth = Riscv.LSLEN,
     hartIdWidth = Global.HART_ID_WIDTH,
     uopIdWidth = Decode.UOP_ID_WIDTH,
-    withAmo = withAmo,
+    withAmo = withAtomics,
     pendingMax = bufferSize
   )
 
@@ -90,7 +92,6 @@ class LsuCachelessPlugin(var layer : LaneLayer,
     val atsStorageLock = retains(ats.storageLock, sats.storageLock)
     val retainer = retains(List(elp.uopLock, srcp.elaborationLock, ifp.elaborationLock, ts.trapLock, ss.elaborationLock, cap.csrLock, ds.elaborationLock) ++ fpwbp.map(_.elaborationLock))
     awaitBuild()
-    Riscv.RVA.set(withAmo)
 
     val translationStorage = ats.newStorage(translationStorageParameter, PerformanceCounterService.DCACHE_TLB_CYCLES)
     val shadowTranslationStorage = sats.newStorage(translationStorageParameter, PerformanceCounterService.DCACHE_TLB_CYCLES)
@@ -104,7 +105,7 @@ class LsuCachelessPlugin(var layer : LaneLayer,
 
     val iwb = ifp.access(wbAt)
     val fpwb = fpwbp.map(_.createPort(wbAt))
-    val amos = Riscv.RVA.get.option(frontend.amos.uops).toList.flatten
+    val amos = frontend.amoUops
     for(load <- frontend.writingRf ++ amos){
       val op = layer(load)
 
@@ -303,7 +304,7 @@ class LsuCachelessPlugin(var layer : LaneLayer,
       bus.cmd.fromHart := True
       bus.cmd.hartId := Global.HART_ID
       bus.cmd.uopId := Decode.UOP_ID
-      if(withAmo) {
+      if(withAtomics) {
         bus.cmd.amoEnable := ATOMIC
         bus.cmd.amoOp     := UOP(31 downto 27)
       }
@@ -440,7 +441,7 @@ class LsuCachelessPlugin(var layer : LaneLayer,
           bus.cmd.size := cmd.size
           bus.cmd.fromHart := False
           bus.cmd.io := False
-          if(withAmo) bus.cmd.amoEnable := False
+          if(withAtomics) bus.cmd.amoEnable := False
         }
       }
     }
@@ -482,7 +483,7 @@ class LsuCachelessPlugin(var layer : LaneLayer,
       val rspPayload = readerValid.mux(CombInit(reader(_.payload)), busRspWithoutId)
       val rspAddress = reader(_.address)
 
-      val SC_MISS = insert(withAmo.mux(rspPayload.scMiss, False))
+      val SC_MISS = insert(if(withZalrsc) rspPayload.scMiss else False)
       val READ_DATA = insert(rspPayload.data)
       elp.freezeWhen(WITH_RSP && !rspValid)
       assert(!(isValid && isCancel && SEL && STORE && !up(Global.TRAP)), "LsuCachelessPlugin saw unexpected select && STORE && cancel request") //TODO add tpk.IO and along the way)) //TODO add tpk.IO and along the way
@@ -528,7 +529,7 @@ class LsuCachelessPlugin(var layer : LaneLayer,
       iwb.valid := SEL && !FLOAT
       iwb.payload := rspShifted.resized
 
-      if (withAmo) when(ATOMIC && !(LOAD || EXECUTE)) {
+      if (withZalrsc) when(ATOMIC && !(LOAD || EXECUTE)) {
         iwb.payload(0) := onJoin.SC_MISS
         iwb.payload(7 downto 1) := 0 // other bits set to 0 by using `LoadSpec(8, ...)` for the instruction
       }

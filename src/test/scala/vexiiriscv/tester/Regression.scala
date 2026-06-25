@@ -146,7 +146,7 @@ class Regression extends MultithreadedFunSuite(sys.env.getOrElse("VEXIIRISCV_REG
 
   dimensions += new Dimensions[ParamSimple]("lsuBus") {
     override def getRandomPosition(state : ParamSimple, random: Random): String = {
-      if(!state.lsuL1Enable && state.extension.withRva) return ""
+      if(!state.lsuL1Enable && state.extension.withAtomics) return ""
       List("", "--lsu-axi4", "--lsu-wishbone").randomPick(random)
     }
   }

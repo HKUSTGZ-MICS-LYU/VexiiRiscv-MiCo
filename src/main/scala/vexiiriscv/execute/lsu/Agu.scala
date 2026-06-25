@@ -79,18 +79,23 @@ class AguFrontend(
   if (RVH && XLEN.get == 64) writingMemGuest ++= List(Rvh.HSV_D)
   for (op <- writingMemGuest) writingMem += add(op).srcs(sk.Op.SRC1, sk.SRC1.RF).decode(dec(STORE -> True, GUEST -> True)).uop
 
-  // Atomic stuff
-  val amos = RVA.get generate new Area {
-    val uops = ArrayBuffer[MicroOp]()
-    uops ++= List(
+  val amoUops = ArrayBuffer[MicroOp]()
+
+  // AMO stuff
+  RVZaamo.get generate new Area {
+    amoUops ++= List(
       Rvi.AMOSWAPW, Rvi.AMOADDW, Rvi.AMOXORW, Rvi.AMOANDW, Rvi.AMOORW,
       Rvi.AMOMINW, Rvi.AMOMAXW, Rvi.AMOMINUW, Rvi.AMOMAXUW
     )
-    if(XLEN.get == 64) uops ++= List(
+    if(XLEN.get == 64) amoUops ++= List(
       Rvi.AMOSWAPD, Rvi.AMOADDD, Rvi.AMOXORD, Rvi.AMOANDD, Rvi.AMOORD,
       Rvi.AMOMIND, Rvi.AMOMAXD, Rvi.AMOMINUD, Rvi.AMOMAXUD
     )
-    for (amo <- uops) add(amo).srcs(sk.Op.SRC1, sk.SRC1.RF).decode(dec(LOAD -> True, STORE -> True, ATOMIC -> True))
+    for (amo <- amoUops) add(amo).srcs(sk.Op.SRC1, sk.SRC1.RF).decode(dec(LOAD -> True, STORE -> True, ATOMIC -> True))
+  }
+
+  // LR/SC stuff
+  RVZalrsc.get generate new Area {
     writingMem += add(Rvi.SCW).srcs(sk.Op.SRC1, sk.SRC1.RF).decode(dec(STORE -> True, ATOMIC -> True)).uop
     writingRf += Rvi.SCW
     writingRf  += add(Rvi.LRW).srcs(sk.Op.SRC1, sk.SRC1.RF).decode(dec(LOAD -> True, ATOMIC -> True)).uop

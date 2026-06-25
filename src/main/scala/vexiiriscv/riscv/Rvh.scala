@@ -75,7 +75,7 @@ object RvhTransformer {
       inst(rs1Range) := 0
     }
 
-    /* RVA */
+    /* Atomics */
     if (rva) when (uop(opRange) === OpCode.ATOMIC) {
       inst := uop
       inst(rs1Range) := 0

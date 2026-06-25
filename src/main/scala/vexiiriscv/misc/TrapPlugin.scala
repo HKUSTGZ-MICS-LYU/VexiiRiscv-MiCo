@@ -667,7 +667,7 @@ class TrapPlugin(val trapAt : Int, val recordHtinst : Boolean) extends FiberPlug
                     uop = pending.uop,
                     compressed = pending.uopIsCompressed,
                     rvfd = RVF || RVD,
-                    rva = RVA,
+                    rva = RVZaamo || RVZalrsc,
                     xlen = XLEN.get,
                   )
                   buffer.trap.pseudoUop := transformer.inst

@@ -70,6 +70,8 @@ class RegressionSingle(compiled : SimCompiled[VexiiRiscv],
   val rvf = dut.database(Riscv.RVF)
   val rvd = dut.database(Riscv.RVD)
   val rva = dut.database(Riscv.RVA)
+  val rvzaamo = dut.database(Riscv.RVZaamo)
+  val rvzalrsc = dut.database(Riscv.RVZalrsc)
   val rvh = dut.database(Riscv.RVH)
   val rvzba = dut.database(Riscv.RVZba)
   val rvzbb = dut.database(Riscv.RVZbb)
@@ -151,7 +153,7 @@ class RegressionSingle(compiled : SimCompiled[VexiiRiscv],
   if(config.riscvTest) {
     riscvTestsFrom2 ++= rvti
     if (rvm) riscvTestsFrom2 ++= rvtm
-    if (rva) riscvTestsFrom2 ++= rvta
+    if (rvzaamo) riscvTestsFrom2 ++= rvta
     if (rvf) riscvTestsFromStart ++= rvtf
     if (rvd) riscvTestsFromStart ++= rvtd
   }
@@ -271,7 +273,7 @@ class RegressionSingle(compiled : SimCompiled[VexiiRiscv],
   }
 
   if(config.riscvTest) {
-    if (rva) {
+    if (rvzalrsc) {
       val args = newArgs()
       args.loadElf(new File(nsf, s"riscv-tests/rv${xlen}ua-p-lrsc"))
       args.failAfter(1000000)

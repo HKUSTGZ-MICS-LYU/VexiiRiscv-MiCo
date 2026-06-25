@@ -143,6 +143,7 @@ case class ExtensionManager(var _isas: mutable.Set[String] = mutable.Set()) exte
     case "withRdTime" => check("zicntr")
     case "withPerformanceCounters" => check("zicntr")
     case "withPerformanceScountovf" => check("sscofpmf")
+    case "withAtomics" => check("zaamo") || check("zalrsc")
 
     case SingleExtension(ext) => check(ext)
     case MultiExtension(ext) => check(ext.toLowerCase)
