@@ -126,7 +126,29 @@ object ExtensionList {
   }
 }
 
-case class ExtensionManager(var _isas: mutable.Set[String] = mutable.Set()) {
+case class ExtensionManager(var _isas: mutable.Set[String] = mutable.Set()) extends Dynamic {
+  private val SingleExtension = "withRv([a-z])".r
+  private val MultiExtension = "with([ZS][a-z0-9]+)".r
+
+  def selectDynamic(name: String): Boolean = name match {
+    case "withMachine" => true
+    case "withSupervisor" => check("s")
+    case "withUser" => check("u")
+    case "withHypervisor" => check("h")
+
+    case "withMul" => check("zmmul")
+    case "withDiv" => check("m")
+
+    case "withIndirectCsr" => check("smcsrind") // sscsrind implies sscsrind
+    case "withRdTime" => check("zicntr")
+    case "withPerformanceCounters" => check("zicntr")
+    case "withPerformanceScountovf" => check("sscofpmf")
+
+    case SingleExtension(ext) => check(ext)
+    case MultiExtension(ext) => check(ext.toLowerCase)
+    case _ => ???
+  }
+
   def add(exts: String*): Unit = {
     for (ext <- exts.map(_.toLowerCase())) {
       if (ExtensionList.indexed.contains(ext)) {
