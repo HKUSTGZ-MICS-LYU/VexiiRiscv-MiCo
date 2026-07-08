@@ -320,7 +320,7 @@ class Soc(c : SocConfig) extends Component {
 
           for (vexii <- vexiis) {
             vexii.bind(msi, 1)
-            if (withHypervisor) vexii.bind(msi, -3)
+            if (withHypervisor && vexiiParam.privParam.withGuestImsic) vexii.bind(msi, -3)
           }
         }
       }

@@ -1176,6 +1176,7 @@ class ParamSimple() {
     if(withPerformanceCounters) plugins += new PerformanceCounterPlugin(additionalCounterCount = additionalPerformanceCounters, withScountovf = withSscofpmf)
     plugins += new CsrAccessPlugin(early0, writeBackKey =  if(lanes == 1) "lane0" else "lane1")
     if(withIndirectCsr) plugins += new IndirectCsrPlugin(withSscsrind, privParam.withHypervisor && withSscsrind)
+    if(privParam.withImsic) plugins += new ImsicPlugin(privParam)
     plugins += new PrivilegedPlugin(privParam, withHartIdInput.mux(null, hartId until hartId+hartCount))
     plugins += new TrapPlugin(trapAt = intWritebackAt, recordHtinst = recordHtinst)
     if(withTesterPlugin) plugins += new TesterPlugin()
