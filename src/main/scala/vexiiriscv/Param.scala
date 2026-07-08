@@ -566,7 +566,10 @@ class ParamSimple() {
   def withMmu = extension.withSupervisor && !disableMmu
 
   def fixIsaParams() = {
-    if(privParam.imsicInterrupts > 0) addISA("smaia", "ssaia")
+    if(privParam.imsicInterrupts > 0) {
+      addISA("smaia")
+      if(extension.withSupervisor) addISA("ssaia")
+    }
     extension.finialize()
     println(s"ISA extensions: ${extension.getIsaNameArray().mkString(", ")}")
 
