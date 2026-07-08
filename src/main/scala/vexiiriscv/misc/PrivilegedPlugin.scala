@@ -84,17 +84,21 @@ case class PrivilegedParam(var withSupervisor : Boolean,
 
   def check(): Unit = {
     assert(!(withSupervisor && !withUser))
-    assert((withSSTC && withSupervisor && withRdTime) || !withSSTC)
+
+    /* SSTC check */
+    if (withSupervisor) {
+      if (withSSTC) assert(withRdTime)
+    }
+
+    /* Hypervisor check */
+    assert(!withHypervisor || withSupervisor)
+
+    /* IMSIC check */
     assert((imsicInterrupts == 0) || (isPow2(imsicInterrupts) && imsicInterrupts >= 64 && imsicInterrupts <= 2048))
     assert(guestExternalInterruptFiles < 64)
-    assert(((guestExternalInterruptFiles == 0 && !withSsaia) || (withGuestImsic && withSsaia)) || !withHypervisor)
-    assert(!withHypervisor || (withSupervisor && withRdTime))
-    if (withHypervisor) {
-      if (withSsaia) {
-        assert(withGuestImsic)
-        assert(guestExternalInterruptFiles < 64 && guestExternalInterruptFiles > 0)
-        assert(injectedInterruptWidth >= 6 && injectedInterruptWidth <= 12)
-      }
+    if (withHypervisor && withSsaia) {
+      assert(injectedInterruptWidth >= 6 && injectedInterruptWidth <= 12)
+      if (withImsic) assert(guestExternalInterruptFiles > 0)
     }
   }
 }
