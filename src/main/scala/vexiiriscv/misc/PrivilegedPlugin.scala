@@ -1137,11 +1137,14 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
           vseiPriority.high := False
           vseiPriority.external := False
           vseiPriority.default := InterruptInfo.defaultOrder.indexOf(9)
-          when (h.imsic.valid && h.imsic.identity =/= 0) {
+          val vseiCandidates = WhenBuilder()
+          if (p.withGuestImsic) vseiCandidates.when(h.imsic.valid && h.imsic.identity =/= 0) {
             vseiPriority.local := h.imsic.identity.resized
-          } elsewhen (h.imsic.mux === 0 && h.victl.iid === 9 && h.victl.iprio =/= 0) {
+          }
+          vseiCandidates.when(p.withGuestImsic.mux(h.imsic.mux === 0, True) && h.victl.iid === 9 && h.victl.iprio =/= 0) {
             vseiPriority.local := h.victl.iprio.resized
-          } otherwise {
+          }
+          vseiCandidates.otherwise {
             vseiPriority.local := 256
           }
 
