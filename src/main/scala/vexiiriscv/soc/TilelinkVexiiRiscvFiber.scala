@@ -5,7 +5,7 @@ import spinal.core
 import spinal.core._
 import spinal.lib.misc._
 import spinal.core.fiber._
-import spinal.lib.{DataCc, StreamCCByToggle}
+import spinal.lib.{DataCc, Stream, StreamCCByToggle}
 import spinal.lib.bus.tilelink.fabric._
 import spinal.lib.cpu.riscv.RiscvHart
 import spinal.lib.cpu.riscv.debug.DebugHartBus
@@ -45,8 +45,8 @@ class TilelinkVexiiRiscvFiber(val plugins : ArrayBuffer[Hostable]) extends Area 
       val sei = p.p.withSupervisor generate InterruptNode.slave()
       val stoptime = Bool()
       val rdtime = p.p.withRdTime generate UInt(64 bits)
-      val mmsi = p.p.withImsic generate Bits(p.p.imsicInterrupts - 1 bits)
-      val smsi = (p.p.withImsic && p.p.withSupervisor) generate Bits(p.p.imsicInterrupts - 1 bits)
+      val mmsi = p.p.withImsic generate Stream(UInt(ImsicTriggerMapper.registerWidth bits))
+      val smsi = (p.p.withImsic && p.p.withSupervisor) generate Stream(UInt(ImsicTriggerMapper.registerWidth bits))
     }
   }
 
@@ -93,8 +93,8 @@ class TilelinkVexiiRiscvFiber(val plugins : ArrayBuffer[Hostable]) extends Area 
       val intNum = pp.p.imsicInterrupts
 
       mode match {
-        case PrivilegeMode.M => priv.mmsi := msi.addImsicFileinfo(ImsicFileInfo(intIdBase, 1 until intNum))
-        case PrivilegeMode.S => priv.smsi := msi.addImsicFileinfo(ImsicFileInfo(intIdBase, 1 until intNum))
+        case PrivilegeMode.M => priv.mmsi << msi.addImsicFileinfo(ImsicFileInfo(intIdBase, 1 until intNum))
+        case PrivilegeMode.S => priv.smsi << msi.addImsicFileinfo(ImsicFileInfo(intIdBase, 1 until intNum))
       }
     }
   }
@@ -134,8 +134,8 @@ class TilelinkVexiiRiscvFiber(val plugins : ArrayBuffer[Hostable]) extends Area 
         if (p.p.withSupervisor) hart.int.s.external := priv.get.sei.flag
         if (p.p.withRdTime) p.logic.rdtime := priv.get.rdtime
         if (p.p.withImsic) {
-          hart.m.imsic.triggers := priv.get.mmsi
-          if (p.p.withSupervisor) hart.s.imsic.triggers := priv.get.smsi
+          hart.m.imsic.trigger << priv.get.mmsi
+          if (p.p.withSupervisor) hart.s.imsic.trigger << priv.get.smsi
         }
       }
       case _ =>

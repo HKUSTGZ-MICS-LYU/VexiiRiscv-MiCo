@@ -12,7 +12,7 @@ import vexiiriscv.riscv._
 
 /**
  * Convert floating point 32 bits to/from 64 bits
- * packAt at 1 to reduce timing presure (unpack -> pack)
+ * packAt at 1 to reduce timing pressure (unpack -> pack)
  *
  * The FpuPackerPlugin will do the heavy work (rounding)
  */

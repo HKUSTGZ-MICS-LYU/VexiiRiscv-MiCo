@@ -21,7 +21,7 @@ import java.util.Scanner
  * Then, in another terminal, you can spawn a new simulation via for instance :
  *   echo '--load-elf ext/NaxSoftware/baremetal/dhrystone/build/rv32ima/dhrystone.elf' | nc localhost 8189
  *
- * The advantage of this aproache over runnint the  sbt "runMain vexiiriscv.tester.TestBench" is that you can
+ * The advantage of this approach over running the sbt "runMain vexiiriscv.tester.TestBench" is that you can
  * "warm up" a simulator, meaning running the generation and compilation of the hardware, and then invoke the simulations
  * many time on it with close to zero startup time.
  * This was done to run the many embench benchmarks efficiently.

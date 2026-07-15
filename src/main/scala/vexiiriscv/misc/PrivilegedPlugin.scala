@@ -785,8 +785,8 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
           mapSie(CSR.SIE, 9, ie.seie, m.ideleg.se)
           mapVie(CSR.SIE, 9, ieShadow.seie, m.ideleg.se, vie.seie)
           // mapMie(CSR.MIE, CSR.SIE, 5, ie.stie, m.ideleg.st)
-          api.read(ie.stie && m.ideleg.st, CSR.SIE, 9)
-          api.writeWhen(ie.stie, m.ideleg.st, CSR.SIE, 9)
+          api.read(ie.stie && m.ideleg.st, CSR.SIE, 5)
+          api.writeWhen(ie.stie, m.ideleg.st, CSR.SIE, 5)
           mapSie(CSR.SIE, 1, ie.ssie, m.ideleg.ss)
           mapVie(CSR.SIE, 1, ieShadow.ssie, m.ideleg.ss, vie.ssie)
 
@@ -797,8 +797,8 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
 
           // ssip
           mapSie(CSR.SIP, 1, ip.ssip, m.ideleg.ss)
-          api.read(vip.ssip && vie.ssie, CsrCondFilter(CSR.SIP, !m.ideleg.ss), 9)
-          api.writeWhen(vip.ssip, vie.ssie, CsrCondFilter(CSR.SIP, !m.ideleg.ss), 9)
+          api.read(vip.ssip && vie.ssie, CsrCondFilter(CSR.SIP, !m.ideleg.ss), 1)
+          api.writeWhen(vip.ssip, vie.ssie, CsrCondFilter(CSR.SIP, !m.ideleg.ss), 1)
           mapVie(CSR.SIP, 1, vip.ssip, m.ideleg.ss, vie.ssie)
         }
 
@@ -846,15 +846,17 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
       }
 
       def genImsicArea(ireg: Int, topei: Int, provider: (Int, Int) => CsrCondFilter) = new Area {
-        val file = ImsicFile(hartIds(hartId), 1 until p.imsicInterrupts)
+        val file = ImsicFile(hartIds(hartId), p.imsicInterrupts)
         val identity = file.identity
-        val triggers = in(file.triggers)
+        val trigger = slave(cloneOf(file.trigger))
+
+        file.trigger << trigger
 
         api.readWrite(file.threshold, provider(IndirectCSR.eithreshold, ireg))
 
         val sources = for (interrupt <- file.interrupts) yield new Area {
           val id = interrupt.id
-          val offset = id / XLEN * (1 + (XLEN == 64).toInt)
+          val offset = id / XLEN * (1 + (XLEN.get == 64).toInt)
 
           api.readWrite(interrupt.ie, provider(IndirectCSR.eie0 + offset, ireg), id % XLEN)
           api.readWrite(interrupt.ip, provider(IndirectCSR.eip0 + offset, ireg), id % XLEN)

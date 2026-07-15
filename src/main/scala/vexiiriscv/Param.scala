@@ -462,6 +462,7 @@ class ParamSimple() {
         case e: BigInt => md ++= s" $e"
         case e: String => md ++= s" $e"
         case e : Product => md ++= s" $e"
+        case e: Set[_] => md ++= s" ${e.map(_.toString).toSeq.sorted.mkString(" ")}"
         case e => {
           if(e.getClass.getName == "scala.Enumeration$Val"){
             md ++= s" ${e.toString}"
@@ -534,7 +535,7 @@ class ParamSimple() {
     if(withRvc) withAlignerBuffer = true
   }
 
-  // Generate a human redable name from most of the supported configuration
+  // Generate a human readable name from most of the supported configuration
   def getName() : String = {
     def opt(that : Boolean, v : String) = that.mux(v, "")
     var isa = s"rv${xlen}"
@@ -626,7 +627,7 @@ class ParamSimple() {
     opt[Unit]("with-rvZcbm-llc") action { (v, c) => addISA("zicbom"); withRvcbmLlc = true }
     opt[Unit]("with-rvZknAes") action { (v, c) => addISA("zkne", "zknd") }
     opt[Unit]("with-sxaia") action { (v, c) => addISA("smaia", "ssaia") }
-    opt[Int]("imsic-interrupt-number") action { (v, c) => addISA("smcsrind", "sscsrind", "smaia", "ssaia"); privParam.imsicInterrupts = v }
+    opt[Int]("imsic-interrupt-number") action { (v, c) => privParam.imsicInterrupts = v }
     opt[Unit]("with-whiteboxer-outputs") action { (v, c) => withWhiteboxerOutputs = true }
     opt[Unit]("with-hart-id-input") action { (v, c) => withHartIdInput = true }
     opt[Unit]("with-hart-id-input-defaulted") action { (v, c) => privParam.withHartIdInputDefaulted = true }

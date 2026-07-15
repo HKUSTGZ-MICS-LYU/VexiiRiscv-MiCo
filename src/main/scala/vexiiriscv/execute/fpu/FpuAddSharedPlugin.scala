@@ -38,7 +38,7 @@ case class FpuAddSharedParam(var preShiftStage : Int = 0,
                              var packAt : Int = 4)
 
 /** This plugin implements an shared hardware floating point adder and provide an API for 
-  * other plugins to time share it. In practice, the RISC-V fadd and fma instruction use it.
+  * other plugins to time share it. In practice, the RISC-V FADD and FMA instruction use it.
   * The actual adder hardware is provided by `FpuAddPlugin`.
   */
 class FpuAddSharedPlugin(lane: ExecuteLanePlugin,

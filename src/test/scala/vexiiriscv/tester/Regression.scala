@@ -172,7 +172,7 @@ class Regression extends MultithreadedFunSuite(sys.env.getOrElse("VEXIIRISCV_REG
 
   dimensions += new Dimensions[ParamSimple]("ishift") {
     override def getRandomPosition(state : ParamSimple, random: Random): String = {
-      if(state.lanes != 1 || state.withLateAlu) return "" //Busy / done handeling of the iterative shifter is buggy
+      if(state.lanes != 1 || state.withLateAlu) return "" //Busy / done handling of the iterative shifter is buggy
       List("", "--with-iterative-shift").randomPick(random)
     }
   }

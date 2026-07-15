@@ -53,7 +53,7 @@ import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 /**
- * Because VexiiRiscv implement PMA (Physical Memory Access) checking staticaly, we need to know what is mapped behind the litex memory busses.
+ * Because VexiiRiscv implement PMA (Physical Memory Access) checking statically, we need to know what is mapped behind the Litex memory busses.
  */
 case class LitexMemoryRegion(mapping : SizeMapping, mode : String, bus : String){
   def isExecutable = mode.contains("x")
@@ -100,6 +100,9 @@ class SocConfig(){
     "imsic_s" -> 0xF1200000l,
   )
 
+  def dmaAddressWidth = if(vexiiParam.physicalWidth <= 32) 32 else 64
+  def externalAddressWidth = if(withDma) dmaAddressWidth else vexiiParam.physicalWidth
+
   def addOptions(parser: scopt.OptionParser[Unit]): Unit = {
     import parser._
     vexiiParam.addOptions(parser)
@@ -138,8 +141,8 @@ class SocConfig(){
  * This is the VexiiRiscv SoC toplevel used with Litex.
  * - Based on tilelink for its memory interconnect
  * - Integrate the PLIC and CLINT peripherals
- * - Access the main memory through a dedicated AXI bus instead of the regular litex wishbone (for performance reasons)
- * - Can be multicore
+ * - Access the main memory through a dedicated AXI bus instead of the regular Litex wishbone (for performance reasons)
+ * - Can be multi-core
  * - Implement memory coherency between the code and a AXI DMA access bus
  * - Has an option L2 cache
  * - Supports JTAG debug
@@ -352,12 +355,12 @@ class Soc(c : SocConfig) extends Component {
       }
     }
 
-    // Implement a memory coherent AXI bus that the litex DMA's can use.
+    // Implement a memory coherent AXI bus that the Litex DMA's can use.
     val dma = c.withDma generate new ClockingArea(litexCd){
       val bus = slave(
         Axi4(
           Axi4Config(
-            addressWidth = 32,
+            addressWidth = dmaAddressWidth,
             dataWidth = mainDataWidth,
             idWidth = 4
           )
@@ -372,7 +375,7 @@ class Soc(c : SocConfig) extends Component {
       val filter = new fabric.TransferFilter()
       filter.up << bridge.down
 
-      //As litex reset will release before our one, we need to ensure that we don't eat a transaction
+      //As Litex reset will release before our one, we need to ensure that we don't eat a transaction
       Fiber build {
         bridge.read.get
         bridge.write.get
@@ -486,7 +489,7 @@ class Soc(c : SocConfig) extends Component {
       }
     }
 
-    // Fix up a few things, like additional pipelining, nameing and bridges.
+    // Fix up a few things, like additional pipelining, naming and bridges.
     val patcher = Fiber build new AreaRoot {
       val mBusAxi = withMem generate mem.toAxi4.down.expendId(8)
       val mBus = withMem generate Axi4SpecRenamer(master(
@@ -544,7 +547,7 @@ object blackboxPolicy extends MemBlackboxingPolicy{
   override def onUnblackboxable(topology: MemTopology, who: Any, message: String): Unit = generateUnblackboxableError(topology, who, message)
 }
 
-// Used by litex to generate the SoC verilog
+// Used by Litex to generate the SoC verilog
 object SocGen extends App{
   var netlistDirectory = "."
   var netlistName = "VexiiRiscvLitex"
@@ -588,16 +591,20 @@ object SocGen extends App{
  * and propagate them to the python environnement by generating some sort of python "header"
  */
 object PythonArgsGen extends App{
-  val vexiiParam = new ParamSimple()
+  val socConfig = new SocConfig()
+  val vexiiParam = socConfig.vexiiParam
   import vexiiParam._
   var pythonPath ="miaou.py"
   assert(new scopt.OptionParser[Unit]("Vexii") {
     help("help").text("prints this usage text")
-    vexiiParam.addOptions(this)
-    opt[Boolean]("debug-sysbus") action { (v, c) =>  }
+    socConfig.addOptions(this)
     opt[String]("python-file") action { (v, c) => pythonPath = v }
 
   }.parse(args, ()).nonEmpty)
+
+  vexiiParam.lsuL1Coherency = socConfig.cpuCount > 1 || socConfig.withDma
+
+  val isaMap = withISA.map(s => s"'$s'").mkString("{", ", ", "}")
 
   import java.io.PrintWriter
 
@@ -605,15 +612,17 @@ object PythonArgsGen extends App{
     write(
       s"""
          |VexiiRiscv.xlen = $xlen
-         |VexiiRiscv.with_rvm = ${(withMul && withDiv).toInt}
-         |VexiiRiscv.with_rva = ${withRva.toInt}
-         |VexiiRiscv.with_rvf = ${withRvf.toInt}
-         |VexiiRiscv.with_rvd = ${withRvd.toInt}
-         |VexiiRiscv.with_rvc = ${withRvc.toInt}
-         |VexiiRiscv.with_rvcbom = ${withRvcbm.toInt}
+         |VexiiRiscv.isa_map = ${isaMap}
          |VexiiRiscv.with_lsu_software_prefetch = ${lsuSoftwarePrefetch.toInt}
          |VexiiRiscv.with_lsu_hardware_prefetch = "${lsuHardwarePrefetch}"
          |VexiiRiscv.internal_bus_width = ${memDataWidth}
+         |VexiiRiscv.pbus_address_width = ${socConfig.externalAddressWidth}
+         |VexiiRiscv.pbus_data_width = ${if(socConfig.axiLiteForce32) 32 else xlen}
+         |VexiiRiscv.mbus_address_width = ${socConfig.externalAddressWidth}
+         |VexiiRiscv.mbus_id_width = 8
+         |VexiiRiscv.dma_address_width = ${socConfig.dmaAddressWidth}
+         |VexiiRiscv.dma_data_width = ${memDataWidth}
+         |VexiiRiscv.dma_id_width = 4
          |""".stripMargin)
     close()
   }
