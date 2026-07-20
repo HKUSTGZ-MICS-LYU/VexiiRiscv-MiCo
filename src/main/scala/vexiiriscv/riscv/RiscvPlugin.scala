@@ -11,21 +11,22 @@ import vexiiriscv.fetch.Fetch
  */
 class RiscvPlugin(var xlen : Int,
                   var hartCount : Int,
-                  var rvc: Boolean,
-                  var rvf: Boolean,
-                  var rvd: Boolean,
-                  var rve: Boolean = false) extends FiberPlugin {
+                  var isa: Set[String]) extends FiberPlugin {
+
+  def has(exts: String*) = exts.forall(ext => isa.contains(ext.toLowerCase))
 
   val logic = during build new Area {
-    if(Riscv.RVC.isEmpty) Riscv.RVC.set(rvc)
+    if(Riscv.RVC.isEmpty) Riscv.RVC.set(has("c"))
     if(Riscv.RVM.isEmpty) Riscv.RVM.set(false)
-    if(Riscv.RVF.isEmpty) Riscv.RVF.set(rvf)
-    if(Riscv.RVD.isEmpty) Riscv.RVD.set(rvd)
-    if(Riscv.RVE.isEmpty) Riscv.RVE.set(rve)
-    if(Riscv.RVZba.isEmpty) Riscv.RVZba.set(false)
-    if(Riscv.RVZbb.isEmpty) Riscv.RVZbb.set(false)
-    if(Riscv.RVZbc.isEmpty) Riscv.RVZbc.set(false)
-    if(Riscv.RVZbs.isEmpty) Riscv.RVZbs.set(false)
+    if(Riscv.RVF.isEmpty) Riscv.RVF.set(has("f"))
+    if(Riscv.RVD.isEmpty) Riscv.RVD.set(has("d"))
+    if(Riscv.RVE.isEmpty) Riscv.RVE.set(has("e"))
+    if(Riscv.RVH.isEmpty) Riscv.RVH.set(has("h"))
+    if(Riscv.RVB.isEmpty) Riscv.RVB.set(has("zba", "zbb", "zbs"))
+    if(Riscv.RVZba.isEmpty) Riscv.RVZba.set(has("zba"))
+    if(Riscv.RVZbb.isEmpty) Riscv.RVZbb.set(has("zbb"))
+    if(Riscv.RVZbc.isEmpty) Riscv.RVZbc.set(has("zbc"))
+    if(Riscv.RVZbs.isEmpty) Riscv.RVZbs.set(has("zbs"))
     Riscv.XLEN.set(xlen)
     Riscv.FLEN.set(List(Riscv.RVF.get.toInt*32, Riscv.RVD.get.toInt*64).max)
     Riscv.LSLEN.set(List(Riscv.XLEN.get, Riscv.FLEN.get).max)

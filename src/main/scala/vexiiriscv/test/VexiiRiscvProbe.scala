@@ -11,7 +11,7 @@ import vexiiriscv.decode.Decode
 import vexiiriscv.execute.lsu._
 import vexiiriscv.fetch.FetchPipelinePlugin
 import vexiiriscv.memory.{PmpPlugin, PmpService}
-import vexiiriscv.misc.PrivilegedPlugin
+import vexiiriscv.misc.{PerformanceCounterPlugin, PrivilegedPlugin}
 import vexiiriscv.riscv.FloatRegFile
 //import vexiiriscv.execute.LsuCachelessPlugin
 import vexiiriscv.fetch.Fetch
@@ -215,12 +215,24 @@ class VexiiRiscvProbe(cpu : VexiiRiscv, kb : Option[konata.Backend], var withRvl
         if (get(Riscv.RVF)) isa += "F"
         if (get(Riscv.RVD)) isa += "D"
         if (get(Riscv.RVC)) isa += "C"
+        if (get(Riscv.RVH)) isa += "H"
         if (get(Riscv.RVZba)) isa += "_zba"
         if (get(Riscv.RVZbb)) isa += "_zbb"
         if (get(Riscv.RVZbc)) isa += "_zbc"
         if (get(Riscv.RVZbs)) isa += "_zbs"
+        if (get(Riscv.RVZcbm)) isa += "_zicbom"
+        if (cpu.host.get[PrivilegedPlugin].exists(_.p.withRdTime)) isa += "_zicntr"
+        if (cpu.host.get[PerformanceCounterPlugin].nonEmpty) isa += "_zihpm"
         tracer.newCpuMemoryView(hartId, 16, 1 << Decode.STORE_ID_WIDTH)
-        tracer.newCpu(hartId, isa, csrp, get(Global.PHYSICAL_WIDTH), cpu.host.get[PmpService].map(_.getPmpNum).getOrElse(0),  hartId)
+        tracer.newCpu(
+          hartId = hartId,
+          isa = isa,
+          priv = csrp,
+          physWidth = get(Global.PHYSICAL_WIDTH),
+          pmpNum = cpu.host.get[PmpService].map(_.getPmpNum).getOrElse(0),
+          triggerCount = cpu.host.get[PrivilegedPlugin].map(_.p.debugTriggers).getOrElse(0),
+          memoryViewId = hartId
+        )
         val pc = if(xlen == 32) 0x80000000l else 0x80000000l
         tracer.setPc(hartId, pc)
       }

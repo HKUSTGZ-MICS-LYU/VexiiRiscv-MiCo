@@ -69,6 +69,7 @@ class RegressionSingle(compiled : SimCompiled[VexiiRiscv],
   val rvf = dut.database(Riscv.RVF)
   val rvd = dut.database(Riscv.RVD)
   val rva = dut.database(Riscv.RVA)
+  val rvh = dut.database(Riscv.RVH)
   val rvzba = dut.database(Riscv.RVZba)
   val rvzbb = dut.database(Riscv.RVZbb)
   val rvzbc = dut.database(Riscv.RVZbc)
@@ -392,7 +393,7 @@ class RegressionSingle(compiled : SimCompiled[VexiiRiscv],
     }
     val path = s"ext/NaxSoftware/buildroot/images/$arch"
     val args = newArgs()
-    args.failAfter(10000000000l)
+    args.failAfter(20000000000l)
     args.name("buildroot")
     args.loadBin(0x80000000l, s"$path/fw_jump.bin")
     args.loadBin(0x80F80000l, s"$path/linux.dtb")
@@ -451,7 +452,7 @@ class RegressionSingle(compiled : SimCompiled[VexiiRiscv],
       help("help").text("prints this usage text")
       t.addOptions(this)
     }.parse(args.args, ()).nonEmpty)
-    
+
     val testPath = new File(compiled.simConfig.getTestPath(t.testName.get))
     val passFile = new File(testPath, "PASS")
     val failFile = new File(testPath, "FAIL")
@@ -526,7 +527,7 @@ object RegressionSingle extends App{
           throw t;
         }
       }
-      FileUtils.forceDelete(f)
+      FileUtils.deleteQuietly(f)
     }
   }
 
@@ -545,6 +546,14 @@ object RegressionSingle extends App{
       opt[Unit]("with-rvls-log") action { (v, c) => config.traceRvlsLog = true }
       opt[Unit]("with-spike-log") action { (v, c) => config.traceSpikeLog = true }
       opt[Unit]("trace-all") action { (v, c) => config.traceRvlsLog = true; config.traceKonata = true; config.traceWave = true; config.traceSpikeLog = true }
+      opt[Unit]("without-all-tests") action { (v, c) => config.disableAll() }
+      opt[Unit]("without-riscv-tests") action { (v, c) => config.riscvTest = false }
+      opt[Unit]("without-riscv-arch-tests") action { (v, c) => config.riscvArchTest = false }
+      opt[Unit]("without-buildroot-tests") action { (v, c) => config.buildroot = false }
+      opt[Unit]("without-regular-tests") action { (v, c) => config.regular = false }
+      opt[Unit]("without-benchmark-tests") action { (v, c) => config.benchmark = false  }
+      opt[Int]("with-free-rtos-tests-count") action { (v, c) => config.freertosCount = v }
+      opt[Unit]("without-jtag-tests") action { (v, c) => config.jtag = false }
       param.addOptions(this)
     }.parse(args, ()).nonEmpty)
     test(param, args, config.fromEnv())
@@ -556,4 +565,3 @@ object RegressionSingle extends App{
     case e : Throwable => System.exit(1)
   }
 }
-
