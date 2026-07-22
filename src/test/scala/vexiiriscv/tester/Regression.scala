@@ -181,7 +181,8 @@ class Regression extends MultithreadedFunSuite(sys.env.getOrElse("VEXIIRISCV_REG
 
   // Generate a bunch of random VexiiRiscv configuration and run the tests on them.
   val random = new Random(61)
-  for(i <- 0 until 100){
+  val configCount = sys.env.getOrElse("VEXIIRISCV_REGRESSION_CONFIG_COUNT", "100").toInt
+  for(i <- 0 until configCount){
     val args = ArrayBuffer[String]()
     val p = new ParamSimple()
     val parser = new scopt.OptionParser[Unit]("VexiiRiscv") {
