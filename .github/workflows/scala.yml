@@ -68,5 +68,5 @@ jobs:
       - name: Compile
         run: sbt ++${{ matrix.scala_version }} clean compile
 
-#      - name: Test
-#        run: NAXRISCV_REGRESSION_THREAD_COUNT=1 SBT_OPTS="-Xmx2G -XX:+UseConcMarkSweepGC -XX:+CMSClassUnloadingEnabled -XX:MaxPermSize=2G -Xss2M  -Duser.timezone=GMT" sbt test
+      - name: Test
+        run: VEXIIRISCV_REGRESSION_CONFIG_COUNT=1 NAXRISCV_REGRESSION_THREAD_COUNT=1 VEXIIRISCV_REGRESSION_BUILDROOT_ENABLED=0 VEXIIRISCV_REGRESSION_FREERTOS_COUNT=0 SBT_OPTS="-Xmx2G" sbt test
