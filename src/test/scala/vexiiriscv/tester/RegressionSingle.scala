@@ -38,6 +38,7 @@ class RegressionSingleConfig(){
     freertosCount = sys.env.getOrElse("VEXIIRISCV_REGRESSION_FREERTOS_COUNT", "1").toInt
     buildroot = sys.env.getOrElse("VEXIIRISCV_REGRESSION_BUILDROOT_ENABLED", "1").toInt.toBoolean
     withSim = sys.env.getOrElse("VEXIIRISCV_REGRESSION_SIM", "1") == "1"
+    jtag = sys.env.getOrElse("VEXIIRISCV_REGRESSION_JTAG", "true").toBoolean
     this
   }
 
