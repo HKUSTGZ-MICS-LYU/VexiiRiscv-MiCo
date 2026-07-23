@@ -88,6 +88,8 @@ case class CsrWrite() extends Bundle {
   val bits = Bits(Riscv.XLEN bits)
   val address = UInt(12 bits)
   val hartId = Global.HART_ID()
+  val clear, mask = Bool()
+  val maskBit = Bits(Riscv.XLEN bits)
 
   def doHalt(): Unit = halt := True
 }

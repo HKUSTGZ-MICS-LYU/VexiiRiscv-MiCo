@@ -39,9 +39,24 @@ case class Trap(laneAgeWidth : Int, full : Boolean) extends Bundle{
   }
 }
 
-case class InterruptState(width: Int) extends Bundle {
-  val id = UInt(width bits)
-  val priority = UInt(width bits)
+case class extendedInterruptPriority() extends Bundle {
+  /*
+   * A high-priority interrupt means its default priority is higher than
+   * external interrupt.
+   */
+  val high = Bool()
+  val external = Bool()
+  val local = UInt(TRAP_IPRIO_WIDTH bits)
+  val default = UInt(InterruptInfo.defaultOrderWidth bits)
+}
+
+object extendedInterruptPriority {
+  implicit def priorityAsUInt(p: extendedInterruptPriority) = p.asBits.asUInt
+}
+
+case class InterruptState(idWidth: Int, priorityWidth: Int) extends Bundle {
+  val id = UInt(idWidth bits)
+  val priority = UInt(priorityWidth bits)
   val privilege = PrivilegeMode.TYPE()
   val valid = Bool()
 }
@@ -224,11 +239,11 @@ class TrapPlugin(val trapAt : Int, val recordHtinst : Boolean) extends FiberPlug
             i => (i.privilege <= p) && //EX : Machine timer interrupt can't go into
             privilegs.filter(_ > p).forall(e => i.delegators.exists(_.privilege == e)) // EX : Supervisor timer need to have machine mode delegator
           ).map(i => {
-            val int = InterruptState(CODE_WIDTH)
+            val int = InterruptState(CODE_WIDTH, TRAP_IPRIO_WIDTH)
             val delegUpOn = i.delegators.filter(_.privilege > p).map(_.enable).fold(True)(_ && _)
             val delegDownOff = !i.delegators.filter(_.privilege <= p).map(_.enable).orR
 
-            int.id := i.id;
+            int.id := i.id
             int.priority := i.priority
             int.privilege := p
             int.valid := i.cond && delegUpOn && delegDownOff
@@ -236,33 +251,88 @@ class TrapPlugin(val trapAt : Int, val recordHtinst : Boolean) extends FiberPlug
             int
           })
 
-          val triggered = RegNext(interrupts.reduceBalancedTree((a, b) => {
-            val priorityCheck = (a.privilege > b.privilege) || ((a.privilege === b.privilege) && (a.priority < b.priority))
+          val result = RegNext(interrupts.reduceBalancedTree((a, b) => {
+            val priorityCheck = (a.priority < b.priority)
             val takeA = !b.valid || (a.valid && (priorityCheck))
             takeA ? a | b
           }))
+
+          val triggerId = B(result.id).andMask(result.valid).resized
+          val triggerPriority = result.priority.andMask(result.valid).resized
+          p match {
+            case PrivilegeMode.M  => {
+              csr.m.candidate.interrupt := triggerId
+              csr.m.candidate.priority  := triggerPriority
+            }
+            case PrivilegeMode.S  => {
+              csr.s.candidate.interrupt := triggerId
+              csr.s.candidate.priority  := triggerPriority
+            }
+            case PrivilegeMode.VS => {
+              csr.vs.candidate.interrupt := triggerId
+              csr.vs.candidate.priority  := triggerPriority
+            }
+          }
+
+          val injects = csr.spec.injectedInterrupt.filter(i => i.privilege == p)
+          val injectInterrupts = injects.nonEmpty generate injects.map(i => {
+            val int = InterruptState(CODE_WIDTH, widthOf(extendedInterruptPriority()))
+            int.id := i.id.resized
+            int.priority := i.priority.resized
+            int.privilege := p
+            int.valid := i.cond
+
+            int
+          })
+
+          val injectResult = injects.nonEmpty generate RegNext(injectInterrupts.reduceBalancedTree((a, b) => {
+            val priorityCheck = a.priority < b.priority
+            val takeA = !b.valid || (a.valid && (priorityCheck))
+            takeA ? a | b
+          }))
+
+          val triggered = injects.nonEmpty.mux(injectResult, result)
+
+          val effectiveInterrupt = B(triggered.id).andMask(triggered.valid).resized
+          val effectivePriority = UInt(8 bits)
+          val withLocalOrder = widthOf(triggered.priority) > InterruptInfo.defaultOrderWidth
+          val localPriority = withLocalOrder.mux(triggered.priority.drop(InterruptInfo.defaultOrderWidth).resize(TRAP_IPRIO_WIDTH).asUInt, triggered.priority)
+          val defaultPriority = triggered.priority.resize(InterruptInfo.defaultOrderWidth)
+          val priorityBuilder = WhenBuilder()
+          priorityBuilder.when(!triggered.valid) {
+            effectivePriority := 0
+          }
+          if (TRAP_IPRIO_WIDTH.get > 8) priorityBuilder.when(localPriority > 255) {
+            effectivePriority := 255
+          }
+          priorityBuilder.when(localPriority === 0) {
+            val higher = defaultPriority < InterruptInfo.defaultOrder.indexOf((p == PrivilegeMode.M).mux(11, 9))
+            effectivePriority := Mux(higher, U(0), U(255))
+          }
+          priorityBuilder.otherwise {
+            effectivePriority := triggered.priority.resized
+          }
         })
 
         val privilegeIndexedTriggers = privilegs.zip(privilegeTriggers)
 
         /* Link xTOPI register */
-        val xtopi = privilegeIndexedTriggers.map{case (p, i) => new Area {
-          val triggered = i.triggered
-          val int = B(triggered.id).andMask(triggered.valid).resized
-
-          p match {
-            case PrivilegeMode.M  => csr.m.topi.interrupt := int
-            case PrivilegeMode.S  => csr.s.topi.interrupt := int
-            case PrivilegeMode.VS => csr.vs.topi.interrupt := int
+        privilegeIndexedTriggers.foreach{case (p, i) => p match {
+            case PrivilegeMode.M  => csr.m.topi.interrupt := i.effectiveInterrupt
+            case PrivilegeMode.S  => csr.s.topi.interrupt := i.effectiveInterrupt
+            case PrivilegeMode.VS => {
+              csr.vs.topi.interrupt := i.effectiveInterrupt
+              csr.vs.topi.priority  := i.effectivePriority
+            }
           }
-        }}
+        }
 
         val result = privilegeIndexedTriggers.map{case (p, i) => {
-          val int = InterruptState(CODE_WIDTH)
+          val int = InterruptState(CODE_WIDTH, 0)
           val triggered = i.triggered
 
           int.id := triggered.id
-          int.priority := triggered.priority
+          int.priority.assignDontCare()
           int.privilege := triggered.privilege
           int.valid := triggered.valid && privilegeAllowInterrupts(p)
 
@@ -285,7 +355,7 @@ class TrapPlugin(val trapAt : Int, val recordHtinst : Boolean) extends FiberPlug
         val pendingInterrupt = validBuffer && priv.api.harts(hartId).allowInterrupts
         csr.int.pending setWhen(pendingInterrupt)
 
-        when(csr.spec.interrupt.map(_.cond).orR){
+        when(privilegeIndexedTriggers.map(_._2.triggered.valid).orR){
           askWake(hartId)
         }
       }

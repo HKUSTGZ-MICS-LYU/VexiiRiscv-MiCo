@@ -326,6 +326,18 @@ class TestOptions {
     cd.onSamplings {
       host.logic.rdtime #= probe.cycle
     }
+    if (host.p.withImsic) {
+      priv.m.imsic.trigger.valid #= false
+      priv.m.imsic.trigger.payload #= 0
+      if (host.p.withSupervisor) {
+        priv.s.imsic.trigger.valid #= false
+        priv.s.imsic.trigger.payload #= 0
+      }
+      if (host.p.withHypervisor && host.p.withGuestImsic) priv.h.imsic.triggers.foreach(trigger => {
+        trigger.valid #= false
+        trigger.payload #= 0
+      })
+    }
     peripheral.withStdIn = withStdIn
 
 

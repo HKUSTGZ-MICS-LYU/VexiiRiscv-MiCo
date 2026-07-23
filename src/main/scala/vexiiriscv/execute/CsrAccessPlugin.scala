@@ -342,6 +342,9 @@ class CsrAccessPlugin(val layer : LaneLayer,
 
         interface.onWriteBits := alu.result
         bus.write.bits := alu.result
+        bus.write.maskBit := alu.mask
+        bus.write.clear := interface.doClear
+        bus.write.mask := interface.doMask
         bus.write.address := interface.csrId
 
         val onWritesDo = False
