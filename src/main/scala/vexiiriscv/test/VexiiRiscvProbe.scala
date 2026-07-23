@@ -197,6 +197,7 @@ class VexiiRiscvProbe(cpu : VexiiRiscv, kb : Option[konata.Backend], var withRvl
 
     var commits = 0l
 
+    val pendingTraps = mutable.Queue[(Boolean, Int, Int)]()
 
     val jbStats = mutable.HashMap[Long, JbStats]()
     val branchStats = new JbStats()
@@ -590,6 +591,13 @@ class VexiiRiscvProbe(cpu : VexiiRiscv, kb : Option[konata.Backend], var withRvl
         simFailure(f"Vexii hasn't committed anything for too long, $status")
       }
 
+      def flushDueTraps(): Unit = {
+        while (hart.pendingTraps.nonEmpty && hart.pendingTraps.head._3 == hart.microOpRetirePtr) {
+          val (interrupt, cause, _) = hart.pendingTraps.dequeue()
+          backends.foreach(_.trap(hart.hartId, interrupt, cause))
+        }
+      }
+      flushDueTraps()
       while (hart.microOpRetirePtr != hart.microOpAllocPtr && hart.microOp(hart.microOpRetirePtr).done) {
         import hart._
         val uopId = hart.microOpRetirePtr
@@ -636,6 +644,7 @@ class VexiiRiscvProbe(cpu : VexiiRiscv, kb : Option[konata.Backend], var withRvl
           uop.clear()
         }
         hart.microOpRetirePtr = (hart.microOpRetirePtr + 1) & microOpIdMask
+        flushDueTraps()
       }
     }
   }
@@ -652,7 +661,12 @@ class VexiiRiscvProbe(cpu : VexiiRiscv, kb : Option[konata.Backend], var withRvl
 
   def checkTraps(): Unit = {
     for(trap <- proxies.trap) if(trap.fire.toBoolean){
-      backends.foreach(_.trap(hartsIds(trap.hartId), trap.interrupt.toBoolean, trap.cause.toInt))
+      val hart = harts(trap.hartId)
+      if (hart.microOpRetirePtr == hart.microOpAllocPtr && hart.pendingTraps.isEmpty) {
+        backends.foreach(_.trap(hartsIds(trap.hartId), trap.interrupt.toBoolean, trap.cause.toInt))
+      } else {
+        hart.pendingTraps.enqueue((trap.interrupt.toBoolean, trap.cause.toInt, hart.microOpAllocPtr))
+      }
     }
   }
 
