@@ -286,7 +286,8 @@ class LsuPlugin(var layer : LaneLayer,
     }
 
     val bus = master(LsuCachelessBus(busParam)).simPublic()
-    val llcBus = withLlcFlush generate master(FlushBus(FlushParam(Global.PHYSICAL_WIDTH, 0)))
+    val llcFlushAddressWidth = XLEN.get max Global.PHYSICAL_WIDTH.get
+    val llcBus = withLlcFlush generate master(FlushBus(FlushParam(llcFlushAddressWidth, 0)))
 
     accessRetainer.await()
     val l1 = LsuL1
@@ -1000,7 +1001,7 @@ class LsuPlugin(var layer : LaneLayer,
         flushTokens := flushTokens - U(llcFlushBuffer.fire) + U(llcBus.rsp.fire)
 
         llcFlushBuffer.valid := isValid && SEL && !lsuTrap && !isCancel && (l1.CLEAN || l1.INVALID)
-        llcFlushBuffer.address := l1.PHYSICAL_ADDRESS
+        llcFlushBuffer.address := l1.PHYSICAL_ADDRESS.resized
 
         val redo = (!llcFlushBuffer.ready || flushFull) && (l1.CLEAN || l1.INVALID)
         when(redo) {
