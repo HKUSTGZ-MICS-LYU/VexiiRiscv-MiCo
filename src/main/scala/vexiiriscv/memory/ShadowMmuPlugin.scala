@@ -25,6 +25,12 @@ class ShadowMmuPlugin(var spec : MmuSpec,
   /* Second stage is always zero-extended */
   def getSignExtension(kind: AddressTranslationPortUsage, rawAddress: UInt) = False
 
+  override def getInvalidationPortParam = AddressTranslationInvalidationParam(
+    asidWidth       = 0,
+    requestAddress  = false,
+    requestGuest    = false,
+  )
+
   val api = during build new Area{
     val fetchTranslationEnable = Bool()
     val lsuTranslationEnable = Bool()
@@ -87,7 +93,9 @@ class ShadowMmuPlugin(var spec : MmuSpec,
     assert(storageSpecs.map(_.p.priority).distinct.size == storageSpecs.size, "MMU storages needs different priorities")
     // Implement the hardware for all the TLB storages
     val tlbGenerateParam = MmuTlbStorageEntryParam(
+      asidWidth   = 0,
       checkUser   = false,
+      checkGlobal = false,
       checkGuest  = false
     )
     val storages = for(ss <- storageSpecs) yield new MmuTlbStorage(spec, physicalWidth, tlbGenerateParam, ss)
@@ -118,8 +126,15 @@ class ShadowMmuPlugin(var spec : MmuSpec,
       val read = for (sl <- storage.sl) yield new Area {
         val readAddress = readStage(ps.req.PRE_ADDRESS)(sl.lineRange)
         for ((way, wayId) <- sl.ways.zipWithIndex) {
+          /* The shadow MMU should not enable the "ASID" and "GUEST" field of TLB */
+          val query = MmuTlbStorageEntryQuery(
+            address = hitsStage(ps.req.PRE_ADDRESS),
+            asid    = B(0),
+            guest   = False
+          )
+
           readStage(sl.keys.ENTRIES)(wayId) := way.readAsync(readAddress)
-          hitsStage(sl.keys.HITS_PRE_VALID)(wayId) := hitsStage(sl.keys.ENTRIES)(wayId).hit(hitsStage(ps.req.PRE_ADDRESS))
+          hitsStage(sl.keys.HITS_PRE_VALID)(wayId) := hitsStage(sl.keys.ENTRIES)(wayId).hit(query)
           ctrlStage(sl.keys.HITS)(wayId) := ctrlStage(sl.keys.HITS_PRE_VALID)(wayId) && ctrlStage(sl.keys.ENTRIES)(wayId).valid
         }
       }

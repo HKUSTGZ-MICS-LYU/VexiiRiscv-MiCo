@@ -29,7 +29,7 @@ object Rvh extends AreaObject {
   val HSV_D              = TypeRSQ(M"0110111----------100000001110011")
 
   val HFENCE_GVMA        = TypeNone(M"0110001----------000000001110011")
-  val HFENCE_VVMA        = TypeNone(M"0010001----------000000001110011")
+  val HFENCE_VVMA        = TypeRS(M"0010001----------000000001110011")
 
   loadSpec(HLV_B)  = LoadSpec( 8,  true)
   loadSpec(HLV_H)  = LoadSpec(16,  true)

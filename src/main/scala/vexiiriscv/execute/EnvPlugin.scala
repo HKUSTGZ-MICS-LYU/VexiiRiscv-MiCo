@@ -5,7 +5,7 @@ import spinal.lib._
 import spinal.lib.misc.plugin.FiberPlugin
 import spinal.lib.misc.pipeline._
 import vexiiriscv.misc.{PrivilegedPlugin, TrapReason, TrapService}
-import vexiiriscv.riscv.{CSR, PrivilegeMode, Rvi, Rvh}
+import vexiiriscv.riscv.{Const, CSR, PrivilegeMode, Rvi, Rvh}
 import vexiiriscv._
 import vexiiriscv.Global._
 import vexiiriscv.decode.Decode
@@ -32,6 +32,7 @@ class EnvPlugin(layer : LaneLayer,
     val ps = host[PrivilegedPlugin]
     val ioRetainer = retains(sp.elaborationLock, ts.trapLock)
     awaitBuild()
+    import SrcKeys._
 
     val age = el.getExecuteAge(executeAt)
     val trapPort = ts.newTrap(age, Execute.LANE_AGE_WIDTH)
@@ -45,9 +46,9 @@ class EnvPlugin(layer : LaneLayer,
 
     add(Rvi.FENCE_I).decode(OP -> EnvPluginOp.FENCE_I)
     add(Rvi.WFI).decode(OP -> EnvPluginOp.WFI)
-    if (ps.implementSupervisor) add(Rvi.SFENCE_VMA).decode(OP -> EnvPluginOp.SFENCE_VMA)
+    if (ps.implementSupervisor) add(Rvi.SFENCE_VMA).srcs(SRC1.RF, SRC2.RF).decode(OP -> EnvPluginOp.SFENCE_VMA)
     if (ps.implementHypervisor) {
-      add(Rvh.HFENCE_VVMA).decode(OP -> EnvPluginOp.HFENCE_VVMA)
+      add(Rvh.HFENCE_VVMA).srcs(SRC1.RF, SRC2.RF).decode(OP -> EnvPluginOp.HFENCE_VVMA)
       add(Rvh.HFENCE_GVMA).decode(OP -> EnvPluginOp.HFENCE_GVMA)
     }
 
@@ -166,6 +167,11 @@ class EnvPlugin(layer : LaneLayer,
               commit := True
               trapPort.exception := False
               trapPort.code := TrapReason.SFENCE_VMA
+              trapPort.tval := srcp.SRC1.asBits.resized
+              trapPort.tval2 := srcp.SRC2.asBits.resized
+              trapPort.arg(0) := isGuest
+              trapPort.arg(1) := Decode.UOP(Const.rs1Range) === 0
+              trapPort.arg(2) := Decode.UOP(Const.rs2Range) === 0
             }
             if(ps.p.withHypervisor) {
               when(privilege === PrivilegeMode.VU || privilege === PrivilegeMode.VS && vmaKoMapping(PrivilegeMode.VS)) {
@@ -192,6 +198,11 @@ class EnvPlugin(layer : LaneLayer,
               commit := True
               trapPort.exception := False
               trapPort.code := TrapReason.SFENCE_VMA
+              trapPort.tval := srcp.SRC1.asBits.resized
+              trapPort.tval2 := srcp.SRC2.asBits.resized
+              trapPort.arg(0) := True
+              trapPort.arg(1) := Decode.UOP(Const.rs1Range) === 0
+              trapPort.arg(2) := Decode.UOP(Const.rs2Range) === 0
             }
             when(PrivilegeMode.isGuest(privilege)) {
               trapPort.code := CSR.MCAUSE_ENUM.VIRTUAL_INSTRUCTION

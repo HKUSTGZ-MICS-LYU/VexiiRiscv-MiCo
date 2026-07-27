@@ -516,10 +516,16 @@ class TrapPlugin(val trapAt : Int, val recordHtinst : Boolean) extends FiberPlug
             val invalidate = ats.newInvalidationPort()
             invalidate.cmd.valid := False
             invalidate.cmd.hartId := hartId
+            invalidate.cmd.address := pending.state.tval.asUInt.resized
+            invalidate.cmd.asid := pending.state.tval2.resized
+            if (invalidate.p.requestGuest) invalidate.cmd.guest := pending.state.arg(0)
+            invalidate.cmd.anyAddress := pending.state.arg(1)
+            if (invalidate.cmd.withAnyAsid) invalidate.cmd.anyAsid := pending.state.arg(2)
 
             val invalidated = RegInit(False) setWhen(invalidate.cmd.fire)
             invalidate.cmd.valid setWhen(!invalidated)
             resetToRunConditions += invalidated
+            invalidate.cmd.force := !invalidated
           }
 
           val satsPorts = sats.mayNeedRedo generate new Area{

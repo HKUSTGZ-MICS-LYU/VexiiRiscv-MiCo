@@ -858,7 +858,8 @@ class ParamSimple() {
       case true => plugins += new vexiiriscv.memory.MmuPlugin(
         spec = if (xlen == 32) MmuSpec.sv32 else MmuSpec.sv39,
         physicalWidth = physicalWidth,
-        asidWidth = asidWidth
+        asidWidth = asidWidth,
+        withGuestSfenceCheck = withHypervisor
       )
     }
     (withRvh && withMmu) match {
