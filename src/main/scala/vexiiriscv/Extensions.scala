@@ -99,7 +99,8 @@ object ExtensionList {
     E("zbc"),
     E("zbs"),
     E("zca"),
-    E("zcd"),
+    E("zcf").depend("c", "f"),
+    E("zcd").depend("c", "d"),
     E("zknd"),
     E("zkne"),
 
@@ -177,7 +178,7 @@ case class ExtensionManager(isa: Set[String] = Set[String]()) extends Dynamic {
 
   def check(exts: String*): Boolean = exts.map(_.toLowerCase).forall { ext => states.get(ext).exists(_.active) }
 
-  def finialize(): Unit = {
+  def finialize(xlen: Int): Unit = {
     add("i")
 
     if (check("e")) {
@@ -193,6 +194,12 @@ case class ExtensionManager(isa: Set[String] = Set[String]()) extends Dynamic {
 
     /* ISA change for VexiiRiscv implementation */
 
+    /* C extension check */
+    if (check("zca")) add("c")
+    if (check("c", "d")) add("zcd")
+    if (xlen == 32 && check("c", "f")) add("zcf")
+
+    /* AES always enable both encrypt and decrypt */
     if (check("zknd") || check("zkne")) {
       add("zknd", "zkne")
     }
@@ -201,6 +208,8 @@ case class ExtensionManager(isa: Set[String] = Set[String]()) extends Dynamic {
 
     val brokenExtensions = getActiveExts.filter(e => !check(ExtensionList.indexed(e).requires :_*))
     assert(brokenExtensions.size == 0, s"Unmet Extensions ${brokenExtensions}")
+
+    assert(xlen == 32 || !check("zcf"), "Zcf is RV32 only")
   }
 
   def addInternal(ext: String): Unit = states.get(ext) match {

@@ -571,7 +571,7 @@ class ParamSimple() {
       addISA("smaia")
       if(extension.withSupervisor) addISA("ssaia")
     }
-    extension.finialize()
+    extension.finialize(xlen)
     println(s"ISA extensions: ${extension.getIsaNameArray().mkString(", ")}")
 
     if(extension.withSupervisor) privParam.withSupervisor = true
