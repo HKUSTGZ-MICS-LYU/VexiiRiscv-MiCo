@@ -23,7 +23,7 @@ import vexiiriscv.schedule.DispatchPlugin
 import vexiiriscv.test.WhiteboxerPlugin
 
 import java.security.MessageDigest
-import scala.collection.mutable.{ArrayBuffer, Set}
+import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 import vexiiriscv.fetch.FetchCachelessTimingParameter
 import vexiiriscv.fetch.FetchL1TimingParameter
@@ -542,6 +542,7 @@ class ParamSimple() {
         case e: Long => md ++= s" $e"
         case e: BigInt => md ++= s" $e"
         case e: String => md ++= s" $e"
+        case e: ExtensionManager => md ++= s" ${e.getIsaStr(includeIgnored = true)}"
         case e : Product => md ++= s" $e"
         case e: Set[_] => md ++= s" ${e.map(_.toString).toSeq.sorted.mkString(" ")}"
         case e => {

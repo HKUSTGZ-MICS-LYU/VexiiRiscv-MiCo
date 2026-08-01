@@ -98,8 +98,8 @@ object ExtensionList {
     E("zbb"),
     E("zbc"),
     E("zbs"),
-    E("zca").depend("c").withDependCheck,
-    E("zcd").depend("c", "d").withDependCheck,
+    E("zca"),
+    E("zcd"),
     E("zknd"),
     E("zkne"),
 
@@ -126,7 +126,20 @@ object ExtensionList {
   }
 }
 
-case class ExtensionManager(var _isas: mutable.Set[String] = mutable.Set()) extends Dynamic {
+sealed trait ImpliedSource
+case class ByExtension(name: String) extends ImpliedSource
+case class ByHint(name: String) extends ImpliedSource
+
+case class ExtensionState(var explicit: Boolean = false,
+                          requiredBy: mutable.Set[String] = mutable.Set[String](),
+                          impliedBy: mutable.Set[ImpliedSource] = mutable.Set[ImpliedSource]()) {
+  def active: Boolean = explicit || requiredBy.nonEmpty || impliedBy.nonEmpty
+  def required: Boolean = requiredBy.nonEmpty || impliedBy.exists(_.isInstanceOf[ByExtension])
+  def requiredExtensions = requiredBy.toSeq ++ impliedBy.collect { case ByExtension(name) => name }
+}
+
+case class ExtensionManager(isa: Set[String] = Set[String]()) extends Dynamic {
+  import ExtensionManager._
   private val SingleExtension = "withRv([a-z])".r
   private val MultiExtension = "with([ZS][a-z0-9]+)".r
 
@@ -150,47 +163,19 @@ case class ExtensionManager(var _isas: mutable.Set[String] = mutable.Set()) exte
     case _ => ???
   }
 
-  def add(exts: String*): Unit = {
-    for (ext <- exts.map(_.toLowerCase())) {
-      if (ExtensionList.indexed.contains(ext)) {
-        if (!check(ext)) {
-          val e = ExtensionList.indexed(ext)
-          _isas += e.name
-          add(e.depends :_*)
-          add(e.implies :_*)
-          dependCheck(false)
-        }
-      } else {
-        println(s"ISA: ${ext} is not supported")
-      }
-    }
+  val states: mutable.HashMap[String, ExtensionState] = {
+    val result = mutable.HashMap.empty[String, ExtensionState]
+    ExtensionList.indexed.keys.foreach(name => result += name -> ExtensionState())
+    result
   }
 
-  def remove(exts: String*): Unit = {
-    for (ext <- exts.map(_.toLowerCase())) {
-      if (check(ext)) {
-        val required = _isas.exists(isa => {
-          val e = ExtensionList.indexed(isa)
-          (e.requires ++ e.depends ++ e.implies).exists(_ == ext)
-        })
+  add(isa.toSeq: _*)
 
-        if (!required) {
-          _isas -= ext
-          dependCheck(true)
-        } else {
-          println(s"ISA: ${ext} can not be removed as it is required or implied")
-        }
-      }
-    }
-  }
+  def add(exts: String*): Unit = exts.map(_.toLowerCase).foreach(addInternal)
 
-  def dependCheck(allowRemove: Boolean): Unit = {
-    /* Set all hint extension */
-    ExtensionList.supported.filter(_.dependCheck).foreach(e => {
-      if (check(e.depends :_*)) add(e.name)
-      else if (allowRemove) remove(e.name)
-    })
-  }
+  def remove(exts: String*): Unit = exts.map(_.toLowerCase).foreach(removeInternal)
+
+  def check(exts: String*): Boolean = exts.map(_.toLowerCase).forall { ext => states.get(ext).exists(_.active) }
 
   def finialize(): Unit = {
     add("i")
@@ -212,17 +197,72 @@ case class ExtensionManager(var _isas: mutable.Set[String] = mutable.Set()) exte
       add("zknd", "zkne")
     }
 
-    dependCheck(true)
+    addDependCheckHints()
 
-    val brokenExtensions = _isas.filter(e => !check(ExtensionList.indexed(e).requires :_*))
+    val brokenExtensions = getActiveExts.filter(e => !check(ExtensionList.indexed(e).requires :_*))
     assert(brokenExtensions.size == 0, s"Unmet Extensions ${brokenExtensions}")
   }
 
-  def check(exts: String*): Boolean = exts.forall(e => _isas.contains(e.toLowerCase()))
+  def addInternal(ext: String): Unit = states.get(ext) match {
+    case Some(_) => updateState(ext)(_.explicit = true)
+    case None => println(s"ISA: ${ext} is not supported")
+  }
 
-  def getIsaStr(includeIgnored: Boolean = false): String = ExtensionManager.getIsaStr(_isas, includeIgnored)
+  def removeInternal(ext: String): Unit = states.get(ext).foreach { state =>
+    if (state.active) {
+      val required = state.required || isActiveRequired(ext)
+      if (required) {
+        println(s"ISA: ${ext} can not be removed as it is required or implied")
+      } else {
+        updateState(ext)(_.explicit = false)
+      }
+    }
+  }
 
-  def getIsaNameArray(includeIgnored: Boolean = false): Seq[String] = ExtensionManager.getIsaNameArray(_isas, includeIgnored)
+  def activate(ext: String): Unit = {
+    val info = ExtensionList.indexed(ext)
+    info.depends.foreach { deps => updateState(deps) { state => state.requiredBy += ext }}
+    info.implies.foreach { implied => updateState(implied) { state => state.impliedBy += ByExtension(ext) }}
+  }
+
+  def deactivate(ext: String): Unit = {
+    val info = ExtensionList.indexed(ext)
+    info.depends.foreach { deps => updateState(deps) { state => state.requiredBy -= ext }}
+    info.implies.foreach { implied => updateState(implied) { state => state.impliedBy -= ByExtension(ext) }}
+  }
+
+  private def updateState(ext: String)(updateOp: ExtensionState => Unit): Boolean = {
+    val state = states(ext)
+    val wasActive = state.active
+    updateOp(state)
+
+    if (wasActive != state.active) {
+      if (state.active) activate(ext) else deactivate(ext)
+    }
+
+    wasActive != state.active
+  }
+
+  def addDependCheckHints(): Unit = {
+    var changed = true
+    while (changed) {
+      changed = false
+      ExtensionList.supported.filter(_.dependCheck).foreach { extension =>
+        val ext = extension.name
+        if (check(extension.depends: _*)) {
+          if (updateState(ext) { state => state.impliedBy += ByHint(ext) }) changed = true
+        }
+      }
+    }
+  }
+
+  def isActiveRequired(ext: String): Boolean = states.exists { case (name, state) => state.active && ExtensionList.indexed(name).requires.contains(ext) }
+
+  def getActiveExts: Set[String] = states.collect { case (name, state) if state.active => name }.toSet
+
+  def getIsaStr(includeIgnored: Boolean = false): String = ExtensionManager.getIsaStr(getActiveExts, includeIgnored)
+
+  def getIsaNameArray(includeIgnored: Boolean = false): Seq[String] = ExtensionManager.getIsaNameArray(getActiveExts, includeIgnored)
 }
 
 object ExtensionManager {
