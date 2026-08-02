@@ -166,7 +166,7 @@ class WhiteboxerPlugin(withOutputs : Boolean) extends FiberPlugin{
         hartId := c(Global.HART_ID)
         uopId := c(Decode.UOP_ID)
         size := c(AguPlugin.SIZE).resized
-        address := c(p.logic.tpk.TRANSLATED)
+        address := c(p.logic.stpk.TRANSLATED)
         data := host.find[IntFormatPlugin](_.lane == p.layer.lane).logic.stages.find(_.ctrlLink == c.ctrlLink).get.wb.payload.resized
         if(p.logic.fpwb.nonEmpty) when(p.logic.fpwb.get.valid){
           data := p.logic.fpwb.get.payload.asSInt.resize(widthOf(data)).asBits.resized
