@@ -626,7 +626,7 @@ object PythonArgsGen extends App{
 
   vexiiParam.lsuL1Coherency = socConfig.cpuCount > 1 || socConfig.withDma
 
-  val isaMap = withISA.map(s => s"'$s'").mkString("{", ", ", "}")
+  val isaMap = extension.getIsaNameArray(includeIgnored = true).map(s => s"'$s'").mkString("{", ", ", "}")
 
   import java.io.PrintWriter
 

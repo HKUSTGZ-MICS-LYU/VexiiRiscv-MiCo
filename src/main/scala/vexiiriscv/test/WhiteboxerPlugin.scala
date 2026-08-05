@@ -209,7 +209,7 @@ class WhiteboxerPlugin(withOutputs : Boolean) extends FiberPlugin{
         address := bus.cmd.address
         data := bus.cmd.data
         storeId := c(Decode.UOP_ID).resized
-        amo := p.withAmo.mux(bus.cmd.amoEnable, False)
+        amo := p.withAtomics.mux(bus.cmd.amoEnable, False)
       })
 
       val lp = host.get[LsuPlugin] map (p => new Area {

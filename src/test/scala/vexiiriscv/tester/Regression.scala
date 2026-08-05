@@ -104,7 +104,7 @@ class Regression extends MultithreadedFunSuite(sys.env.getOrElse("VEXIIRISCV_REG
   addDim("btbParam", List("--btb-sets 512 --btb-hash-width 16", "--btb-sets 128 --btb-hash-width 6"))
   dimensions += new Dimensions[ParamSimple]("fpu") {
     override def getRandomPosition(state : ParamSimple, random: Random): String = {
-      if(!state.withMul || !state.withDiv) return ""
+      if(!state.extension.withMul || !state.extension.withDiv) return ""
       return List("", "--with-isa f", "--with-isa f,d").randomPick(random)
     }
   }
@@ -131,7 +131,7 @@ class Regression extends MultithreadedFunSuite(sys.env.getOrElse("VEXIIRISCV_REG
 
   dimensions += new Dimensions[ParamSimple]("privileges") {
     override def getRandomPosition(state : ParamSimple, random: Random): String = {
-      if(state.xlen == 32 && state.withRvd && !state.lsuL1Enable) return "" // LsuCachelessPlugin 64 bits doesn't support mmu access
+      if(state.xlen == 32 && state.extension.withRvd && !state.lsuL1Enable) return "" // LsuCachelessPlugin 64 bits doesn't support mmu access
       /* Only test hypervisor with a generic system */
       List("", "--with-isa s", "--with-isa s,u", "--with-isa g,h").randomPick(random)
     }
@@ -146,7 +146,7 @@ class Regression extends MultithreadedFunSuite(sys.env.getOrElse("VEXIIRISCV_REG
 
   dimensions += new Dimensions[ParamSimple]("lsuBus") {
     override def getRandomPosition(state : ParamSimple, random: Random): String = {
-      if(!state.lsuL1Enable && state.withRva) return ""
+      if(!state.lsuL1Enable && state.extension.withAtomics) return ""
       List("", "--lsu-axi4", "--lsu-wishbone").randomPick(random)
     }
   }

@@ -69,7 +69,8 @@ case class LsuTimingParameter(var addressAt : Int = 0,
  * which can make it challenging to read.
  */
 class LsuPlugin(var layer : LaneLayer,
-                var withRva : Boolean,
+                var withZaamo : Boolean,
+                var withZalrsc : Boolean,
                 var translationStorageParameter: Any,
                 var translationPortParameter: Any,
                 var pmpPortParameter : Any,
@@ -84,6 +85,7 @@ class LsuPlugin(var layer : LaneLayer,
 
   if(withLlcFlush) assert(withCbm)
   def withL1Cmb = withCbm && !withLlcFlush
+  def withAtomics = withZaamo || withZalrsc
 
   override def accessRefillCount: Int = 0
   override def accessWake: Bits = B(0)
@@ -139,7 +141,6 @@ class LsuPlugin(var layer : LaneLayer,
     val earlyLock = retains(List(ats.storageLock, sats.storageLock) ++ pcs.map(_.elaborationLock).toList)
     val retainer = retains(List(elp.uopLock, srcp.elaborationLock, ifp.elaborationLock, ts.trapLock, ss.elaborationLock, cap.csrLock, ds.elaborationLock) ++ fpwbp.map(_.elaborationLock))
     awaitBuild()
-    Riscv.RVA.set(withRva)
 
     // * Instanciate a few hardware interfaces *
     val translationStorage = ats.newStorage(translationStorageParameter, PerformanceCounterService.DCACHE_TLB_CYCLES)
@@ -160,7 +161,7 @@ class LsuPlugin(var layer : LaneLayer,
 
     // Extends the instruction specifications done by the AGU with sign extensions and flush behavior
     val iwb = ifp.access(wbAt)
-    val amos = Riscv.RVA.get.option(frontend.amos.uops).toList.flatten
+    val amos = frontend.amoUops
     for(load <- frontend.writingRf ++ amos){
       val op = layer(load)
       op.mayFlushUpTo(ctrlAt) // page fault / trap / L1 hazard / store queue hazard / ...
@@ -751,16 +752,16 @@ class LsuPlugin(var layer : LaneLayer,
         l1.WRITE_DATA := l1.SIZE.muxListDc(mapping)
       }
 
-      val SC_MISS = insert(scMiss) //insert(withRva.mux(io.doIt.mux[Bool](io.rsp.scMiss, scMiss), False))
+      val SC_MISS = insert(scMiss)
 
-      if (!Riscv.RVA) {
+      if (!withZalrsc) {
         scMiss := False
         l1.lockPort.valid := False
         l1.lockPort.address := 0
       }
 
-      // Implements a little state machine,the AMO ALU and the reservation logic (LR/SC)
-      val rva = Riscv.RVA.get generate new Area {
+      // Implements the AMO ALU.
+      val amo = withZaamo generate new Area {
         val srcBuffer = RegNext[Bits](loadData.RESULT.resize(XLEN bits))
         val alu = new AtomicAlu(
           op = UOP(29, 3 bits),
@@ -778,41 +779,42 @@ class LsuPlugin(var layer : LaneLayer,
         val delay = History(!elp.isFreezed(), 1 to 2)
         val freezeIt = isValid && preCtrl.IS_AMO && delay.orR
         elp.freezeWhen(freezeIt) //Note that if the refill is faster than 2 cycle, it may create issues
+      }
 
+      // Implements the reservation logic (LR/SC).
+      val lrsc = withZalrsc generate new Area {
         assert(Global.HART_COUNT.get == 1)
-        val lrsc = new Area {
-          val capture = False // True when the software ask a reservation (load reserve)
-          val reserved = RegInit(False)
-          val address = Reg(l1.PHYSICAL_ADDRESS)
+        val capture = False // True when the software ask a reservation (load reserve)
+        val reserved = RegInit(False)
+        val address = Reg(l1.PHYSICAL_ADDRESS)
 
-          when(!elp.isFreezed() && isValid && FROM_LSU && l1.SEL && !lsuTrap && !onPma.IO) {
-            when(l1.STORE){
-              reserved := False // Kill the reservation on any store
-            } elsewhen(apply(l1.ATOMIC)) {
-              capture := True // Load Reserve
-            }
+        when(!elp.isFreezed() && isValid && FROM_LSU && l1.SEL && !lsuTrap && !onPma.IO) {
+          when(l1.STORE){
+            reserved := False // Kill the reservation on any store
+          } elsewhen(apply(l1.ATOMIC)) {
+            capture := True // Load Reserve
           }
-          scMiss := !reserved
-          l1.lockPort.valid := reserved
-          l1.lockPort.address := address
+        }
+        scMiss := !reserved
+        l1.lockPort.valid := reserved
+        l1.lockPort.address := address
 
-          val age = Reg(UInt(6 bits)) //Will make the reservation die after 2**(bits-1) cycles
-          when(!age.msb && !elp.isFreezed()){
-            // It only age when the pipeline isn't freezed for 2 reasons :
-            // - Else we may lose the reservation at the same time we are processing a store condition => transient cases
-            // - If a LR is followed by a divide instruction (for example), this will slow down things and ensure we have a chance to pass
-            age := age + 1
-          }
+        val age = Reg(UInt(6 bits)) //Will make the reservation die after 2**(bits-1) cycles
+        when(!age.msb && !elp.isFreezed()){
+          // It only age when the pipeline isn't freezed for 2 reasons :
+          // - Else we may lose the reservation at the same time we are processing a store condition => transient cases
+          // - If a LR is followed by a divide instruction (for example), this will slow down things and ensure we have a chance to pass
+          age := age + 1
+        }
 
-          when(age.msb || io.cmdSent || l1.freezeUnlock){ // io.cmdSent ensure we do not create external deadlock
-            reserved := False
-            age := 0
-          }
-          when(capture && (reserved || age >= 8)){ //age >= 8 Ensure we don't prevent forward progression of other agents
-            reserved  := !reserved //Toggling the reservation is a way to ensure reservation changes are notified by the LsuL1 (not great)
-            address :=  l1.PHYSICAL_ADDRESS
-            age := 0
-          }
+        when(age.msb || io.cmdSent || l1.freezeUnlock){ // io.cmdSent ensure we do not create external deadlock
+          reserved := False
+          age := 0
+        }
+        when(capture && (reserved || age >= 8)){ //age >= 8 Ensure we don't prevent forward progression of other agents
+          reserved  := !reserved //Toggling the reservation is a way to ensure reservation changes are notified by the LsuL1 (not great)
+          address :=  l1.PHYSICAL_ADDRESS
+          age := 0
         }
       }
 
@@ -1064,7 +1066,7 @@ class LsuPlugin(var layer : LaneLayer,
       skipsWrite += preCtrl.MISS_ALIGNED
       skipsWrite += FROM_LSU && (onTrigger.HIT || pmpPort.ACCESS_FAULT)
       skipsWrite += FROM_PREFETCH
-      if(Riscv.RVA) skipsWrite += l1.ATOMIC && !(l1.LOAD || l1.EXECUTE) && scMiss
+      if(withZalrsc) skipsWrite += l1.ATOMIC && !(l1.LOAD || l1.EXECUTE) && scMiss
       if (withStoreBuffer) skipsWrite += wb.selfHazard || !FROM_WB && wb.hit
 
       l1.ABORD := abords.orR
@@ -1139,7 +1141,7 @@ class LsuPlugin(var layer : LaneLayer,
       iwb.valid := SEL && !FLOAT
       iwb.payload := onCtrl.loadData.RESULT.resized
 
-      if (withRva) when(l1.ATOMIC && !(l1.LOAD || l1.EXECUTE)) {
+      if (withZalrsc) when(l1.ATOMIC && !(l1.LOAD || l1.EXECUTE)) {
         iwb.payload(0) := onCtrl.SC_MISS
         iwb.payload(7 downto 1) := 0  // other bits set to 0 by using `LoadSpec(8, ...)` for the instruction
       }
