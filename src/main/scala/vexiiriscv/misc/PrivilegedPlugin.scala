@@ -671,12 +671,15 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         }
 
         val edeleg = p.withSupervisor generate new api.Csr(CSR.MEDELEG) {
-          val iam, bp, eu, es, ipf, lpf, spf = RegInit(False)
+          val iam = !RVC generate RegInit(False)
+          val iaf, ii, bp, lam, laf, sam, saf, eu, es, ipf, lpf, spf = RegInit(False)
+          val hef = p.withRdTime generate RegInit(False)
           val eh, vi, igpf, lgpf, sgpf = p.withHypervisor generate RegInit(False)
-          val mapping = mutable.LinkedHashMap(0 -> iam, 3 -> bp, 8 -> eu, 9 -> es, 12 -> ipf, 13 -> lpf, 15 -> spf) ++ p.withHypervisor.mux(
-            mutable.LinkedHashMap(10 -> eh, 20 -> igpf, 21 -> lgpf, 22 -> vi, 23 -> sgpf),
-            mutable.LinkedHashMap()
-          )
+          val mapping = mutable.LinkedHashMap(1 -> iaf, 2 -> ii, 3 -> bp, 4 -> lam, 5 -> laf, 6 -> sam, 7 -> saf, 8 -> eu, 9 -> es, 12 -> ipf, 13 -> lpf, 15 -> spf)
+          if (!RVC) mapping += 0 -> iam
+          if (p.withRdTime) mapping += 19 -> hef
+          if (p.withHypervisor) mapping ++= mutable.LinkedHashMap(10 -> eh, 20 -> igpf, 21 -> lgpf, 22 -> vi, 23 -> sgpf)
+
           for ((id, enable) <- mapping) readWrite(id -> enable)
         }
 
@@ -821,8 +824,10 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         }
 
         val edeleg = new api.Csr(CSR.HEDELEG) {
-          val bp, eu, ipf, lpf, spf = RegInit(False)
-          val mapping = mutable.LinkedHashMap(3 -> bp, 8 -> eu, 12 -> ipf, 13 -> lpf, 15 -> spf)
+          val iam, iaf, ii, bp, lam, laf, sam, saf, eu, ipf, lpf, spf = RegInit(False)
+          val hef = p.withRdTime generate RegInit(False)
+          val mapping = mutable.LinkedHashMap(0 -> iam, 1 -> iaf, 2 -> ii, 3 -> bp, 4 -> lam, 5 -> laf, 6 -> sam, 7 -> saf, 8 -> eu, 12 -> ipf, 13 -> lpf, 15 -> spf)
+          if (p.withRdTime) mapping += 19 -> hef
           for ((id, enable) <- mapping) readWrite(id -> enable)
         }
 
