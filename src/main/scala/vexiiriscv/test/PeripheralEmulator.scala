@@ -35,7 +35,7 @@ abstract class PeripheralEmulator(offset : Long, mei : Bool, sei : Bool, msi : B
   val CMB_DATA = 0x108
   val RANDOM = 0xA8
 
-  var cmp = BigInt(0)
+  var cmp = BigInt("FFFFFFFFFFFFFFFF", 16)
   val cmb = new {
     var mem : SparseMemory = null
     var address = 0l
@@ -48,7 +48,7 @@ abstract class PeripheralEmulator(offset : Long, mei : Bool, sei : Bool, msi : B
   if (mti != null) {
     mti #= false
     cd.onSamplings {
-      mti #= cmp < getClintTime()
+      mti #= cmp <= getClintTime()
     }
   }
 
@@ -99,7 +99,7 @@ abstract class PeripheralEmulator(offset : Long, mei : Bool, sei : Bool, msi : B
             case 8 => cmp = raw & BigInt("FFFFFFFFFFFFFFFF", 16)
           }
         }
-        case CLINT_CMPH => cmp = cmp & 0xFFFFFFFFl | (BigInt(data.map(_.toByte).reverse.toArray).toLong << 32)
+        case CLINT_CMPH => cmp = (cmp & 0xFFFFFFFFl) | ((raw & 0xFFFFFFFFl) << 32)
         case IO_FAULT_ADDRESS => {
           return true
         }
@@ -170,4 +170,3 @@ abstract class PeripheralEmulator(offset : Long, mei : Bool, sei : Bool, msi : B
   }
 
 }
-
