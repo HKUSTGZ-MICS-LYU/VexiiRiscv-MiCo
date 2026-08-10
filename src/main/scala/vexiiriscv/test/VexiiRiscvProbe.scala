@@ -10,7 +10,7 @@ import vexiiriscv._
 import vexiiriscv.decode.Decode
 import vexiiriscv.execute.lsu._
 import vexiiriscv.fetch.FetchPipelinePlugin
-import vexiiriscv.memory.{PmpPlugin, PmpService}
+import vexiiriscv.memory.{MmuPlugin, PmpPlugin, PmpService}
 import vexiiriscv.misc.{PerformanceCounterPlugin, PrivilegedPlugin}
 import vexiiriscv.riscv.FloatRegFile
 //import vexiiriscv.execute.LsuCachelessPlugin
@@ -220,6 +220,7 @@ class VexiiRiscvProbe(cpu : VexiiRiscv, kb : Option[konata.Backend], var withRvl
           physWidth = get(Global.PHYSICAL_WIDTH),
           pmpNum = cpu.host.get[PmpService].map(_.getPmpNum).getOrElse(0),
           triggerCount = cpu.host.get[PrivilegedPlugin].map(_.p.debugTriggers).getOrElse(0),
+          asidWidth = cpu.host.get[MmuPlugin].map(_.asidWidth).getOrElse(0),
           memoryViewId = hartId
         )
         val pc = if(xlen == 32) 0x80000000l else 0x80000000l
