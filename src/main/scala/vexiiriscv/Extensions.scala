@@ -106,15 +106,18 @@ object ExtensionList {
 
     /* Ss* extensions */
     E("ssaia").require("s").depend("smaia", "sscsrind"),
-    E("sscofpmf").require("s"),
+    E("sscofpmf").require("s").depend("zihpm"),
     E("sscsrind").require("s").depend("smcsrind"),
     E("sstc").require("s").depend("zicntr"),
+
+    /* Sv* extensions */
+    E("svade").require("s"),
 
     /* Sh* extensions */
     E("shlcofideleg").require("h").depend("sscofpmf"),
 
     /* Sm* extensions */
-    E("smcntrpmf"),
+    E("smcntrpmf").depend("zicntr"),
     E("smaia").depend("smcsrind"),
     E("smcsrind"),
   )
