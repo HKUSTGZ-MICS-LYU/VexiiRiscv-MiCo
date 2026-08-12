@@ -607,6 +607,7 @@ class ParamSimple() {
     if (relaxedShift) r += "rsft"
     if (relaxedSrc) r += "rsrc"
     if (extension.withPerformanceCounters) r += s"pc$additionalPerformanceCounters"
+    if (withMmu) r += s"asid$asidWidth"
     if (withIterativeShift) r += "isft"
     if (extension.withDiv) r += s"d${divRadix}${divImpl}${if(divArea)"Area" else ""}"
     if (privParam.withDebug) r += s"pdbg"
