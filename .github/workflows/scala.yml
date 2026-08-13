@@ -50,13 +50,23 @@ jobs:
             ~/.sbt
           key: ${{ runner.os }}-sbt-${{ hashFiles('**/build.sbt') }}
 
+      - name: Compute tools cache key
+        id: tools-key
+        shell: bash
+        run: |
+          rvls_commit="$(git -C ext/rvls rev-parse HEAD)"
+          spike_commit="$(git -C ext/riscv-isa-sim rev-parse HEAD)"
+          recipe_commit="$(git rev-parse HEAD:.github/workflows/tools.sh)"
+
+          echo "key=tools-rvls${rvls_commit}-spike${spike_commit}-${recipe_commit}" >> "$GITHUB_OUTPUT"
+
       - name: Cache tools
         id: tools
         uses: actions/cache@v4
         with:
           path: |
             ~/tools
-          key: ${{ runner.os }}-tools_v8
+          key: ${{ runner.os }}-${{ steps.tools-key.outputs.key }}
 
       - name: Setup env
         run: echo "$HOME/tools/bin" >> $GITHUB_PATH
