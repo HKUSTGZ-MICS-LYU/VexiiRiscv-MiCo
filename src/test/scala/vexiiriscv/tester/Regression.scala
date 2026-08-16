@@ -178,6 +178,13 @@ class Regression extends MultithreadedFunSuite(sys.env.getOrElse("VEXIIRISCV_REG
     }
   }
 
+  dimensions += new Dimensions[ParamSimple]("asid") {
+    override def getRandomPosition(state : ParamSimple, random: Random): String = {
+      if(!state.withMmu) return ""
+      if(state.xlen == 32) List("", "--asid-width=9").randomPick(random)
+      else List("", "--asid-width=16").randomPick(random)
+    }
+  }
 
   // Generate a bunch of random VexiiRiscv configuration and run the tests on them.
   val random = new Random(61)

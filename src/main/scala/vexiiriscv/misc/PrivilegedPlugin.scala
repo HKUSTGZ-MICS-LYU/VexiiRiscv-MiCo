@@ -670,13 +670,19 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
           readWrite(11 -> meie, 7 -> mtie, 3 -> msie)
         }
 
+        // Interrupt conditions must be re-evaluated before the next instruction after a write.
+        cap.trapNextOnWrite += CsrListFilter(List(CSR.MIP, CSR.MIE))
+
         val edeleg = p.withSupervisor generate new api.Csr(CSR.MEDELEG) {
-          val iam, bp, eu, es, ipf, lpf, spf = RegInit(False)
+          val iam = !RVC generate RegInit(False)
+          val iaf, ii, bp, lam, laf, sam, saf, eu, es, ipf, lpf, spf = RegInit(False)
+          val hef = p.withRdTime generate RegInit(False)
           val eh, vi, igpf, lgpf, sgpf = p.withHypervisor generate RegInit(False)
-          val mapping = mutable.LinkedHashMap(0 -> iam, 3 -> bp, 8 -> eu, 9 -> es, 12 -> ipf, 13 -> lpf, 15 -> spf) ++ p.withHypervisor.mux(
-            mutable.LinkedHashMap(10 -> eh, 20 -> igpf, 21 -> lgpf, 22 -> vi, 23 -> sgpf),
-            mutable.LinkedHashMap()
-          )
+          val mapping = mutable.LinkedHashMap(1 -> iaf, 2 -> ii, 3 -> bp, 4 -> lam, 5 -> laf, 6 -> sam, 7 -> saf, 8 -> eu, 9 -> es, 12 -> ipf, 13 -> lpf, 15 -> spf)
+          if (!RVC) mapping += 0 -> iam
+          if (p.withRdTime) mapping += 19 -> hef
+          if (p.withHypervisor) mapping ++= mutable.LinkedHashMap(10 -> eh, 20 -> igpf, 21 -> lgpf, 22 -> vi, 23 -> sgpf)
+
           for ((id, enable) <- mapping) readWrite(id -> enable)
         }
 
@@ -686,6 +692,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
 
           if (p.withHypervisor) readWrite(12 -> True, 10 -> True, 6 -> True, 2 -> True)
         }
+        if (p.withSupervisor) cap.trapNextOnWrite += CsrListFilter(List(CSR.MIDELEG))
 
         val tvec = crs.readWriteRam(CSR.MTVEC)
         val tval = crs.readWriteRam(CSR.MTVAL)
@@ -790,6 +797,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
           readWrite(0 -> iprio, 8 -> ipriom, 9 -> dpr, 16 -> iid, 30 -> vti)
         }
         val injectCheck = p.withSsaia.mux(!victl.vti, True)
+        if (p.withSsaia) cap.trapNextOnWrite += CsrListFilter(List(CSR.HVICTL))
 
         val sstc = new Area {
           val logic = p.withSSTC generate new Area {
@@ -821,8 +829,10 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         }
 
         val edeleg = new api.Csr(CSR.HEDELEG) {
-          val bp, eu, ipf, lpf, spf = RegInit(False)
-          val mapping = mutable.LinkedHashMap(3 -> bp, 8 -> eu, 12 -> ipf, 13 -> lpf, 15 -> spf)
+          val iam, iaf, ii, bp, lam, laf, sam, saf, eu, ipf, lpf, spf = RegInit(False)
+          val hef = p.withRdTime generate RegInit(False)
+          val mapping = mutable.LinkedHashMap(0 -> iam, 1 -> iaf, 2 -> ii, 3 -> bp, 4 -> lam, 5 -> laf, 6 -> sam, 7 -> saf, 8 -> eu, 12 -> ipf, 13 -> lpf, 15 -> spf)
+          if (p.withRdTime) mapping += 19 -> hef
           for ((id, enable) <- mapping) readWrite(id -> enable)
         }
 
@@ -835,6 +845,7 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
             val isFullEncode = p.guestExternalInterruptFiles == 63
             imsic.mux := isFullEncode.mux(vgein, Mux(vgein < p.guestExternalInterruptFiles + 1, vgein, U(0))).resized
           }
+          cap.trapNextOnWrite += CsrListFilter(List(CSR.HSTATUS, CSR.HGEIE))
         }
 
         val gei = p.withGuestImsic generate new Area {
@@ -860,6 +871,8 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
           readWrite(12 -> geie, 10 -> vseie, 6 -> vstie, 2 -> vssie)
           api.readWrite(CSR.MIE, 12 -> geie, 10 -> vseie, 6 -> vstie, 2 -> vssie)
         }
+
+        cap.trapNextOnWrite += CsrListFilter(List(CSR.HIDELEG, CSR.HIE, CSR.HIP, CSR.HVIP))
 
         val ip = new Area {
           val vstipSoft = RegInit(False)
@@ -980,6 +993,8 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
           api.readWrite(ip.ssip, CsrCondFilter(CSR.MVIP, !vie.ssie), 1)
           api.read(ip.stipOr, CSR.MVIP, 5)
           api.writeWhen(ip.stipSoft, !m.envcfg.stce, CSR.MVIP, 5)
+
+          cap.trapNextOnWrite += CsrListFilter(List(CSR.MVIEN, CSR.MVIP))
         }
 
         val tvec = crs.readWriteRam(CSR.STVEC)
@@ -1043,6 +1058,8 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         api.read(ip.stipOr && m.ideleg.st, CSR.SIP, 5)
         api.readWrite(ip.ssip, CSR.MIP, 1)
         api.readToWrite(ip.seipSoft, CSR.MIP, 9) //Avoid an external interrupt value to propagate to the soft external interrupt register.
+
+        cap.trapNextOnWrite += CsrListFilter(List(CSR.SIP, CSR.SIE))
 
         spec.addInterrupt(ip.ssip && ie.ssie, id = 1, privilege = PrivilegeMode.S, delegators = List(Delegator(m.ideleg.ss, PrivilegeMode.M)))
         spec.addInterrupt(ip.stipOr && ie.stie, id = 5, privilege = PrivilegeMode.S, delegators = List(Delegator(m.ideleg.st, PrivilegeMode.M)))
@@ -1121,6 +1138,8 @@ class PrivilegedPlugin(val p : PrivilegedParam, val hartIds : Seq[Int]) extends 
         mapVSie(CSR.VSIP, 5, h.ip.vstipOr, h.ideleg.vst, sWrite = false)
         mapVSie(CSR.VSIP, 1, h.ip.vssip, h.ideleg.vss)
         api.remapWhen(CSR.SIP, CSR.VSIP, withGuestPrivilege)
+
+        cap.trapNextOnWrite += CsrListFilter(List(CSR.VSIE, CSR.VSIP))
 
         if (p.withSsaia) api.allowCsr(CsrListFilter(List(CSR.VSIP, CSR.VSIE)), withSupervisorPrivilege || (withGuestPrivilege && h.injectCheck))
 
