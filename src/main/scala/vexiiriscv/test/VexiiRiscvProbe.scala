@@ -10,12 +10,12 @@ import vexiiriscv._
 import vexiiriscv.decode.Decode
 import vexiiriscv.execute.lsu._
 import vexiiriscv.fetch.FetchPipelinePlugin
-import vexiiriscv.memory.{PmpPlugin, PmpService}
-import vexiiriscv.misc.PrivilegedPlugin
+import vexiiriscv.memory.{MmuPlugin, PmpPlugin, PmpService}
+import vexiiriscv.misc.{PerformanceCounterPlugin, PrivilegedPlugin}
 import vexiiriscv.riscv.FloatRegFile
 //import vexiiriscv.execute.LsuCachelessPlugin
 import vexiiriscv.fetch.Fetch
-import vexiiriscv.riscv.{IntRegFile, Riscv}
+import vexiiriscv.riscv.{IntRegFile, Riscv, RiscvPlugin}
 import vexiiriscv.test.konata.{Comment, Flush, Retire, Spawn, Stage}
 
 import scala.collection.mutable
@@ -197,6 +197,7 @@ class VexiiRiscvProbe(cpu : VexiiRiscv, kb : Option[konata.Backend], var withRvl
 
     var commits = 0l
 
+    val pendingTraps = mutable.Queue[(Boolean, Int, Int)]()
 
     val jbStats = mutable.HashMap[Long, JbStats]()
     val branchStats = new JbStats()
@@ -209,18 +210,19 @@ class VexiiRiscvProbe(cpu : VexiiRiscv, kb : Option[konata.Backend], var withRvl
           case Some(x) => "M" + x.p.withSupervisor.mux("S", "") + x.p.withUser.mux("U", "")
           case None => "M"
         }
-        var isa = s"RV${xlen}I"
-        if (get(Riscv.RVM)) isa += "M"
-        if (get(Riscv.RVA)) isa += "A"
-        if (get(Riscv.RVF)) isa += "F"
-        if (get(Riscv.RVD)) isa += "D"
-        if (get(Riscv.RVC)) isa += "C"
-        if (get(Riscv.RVZba)) isa += "_zba"
-        if (get(Riscv.RVZbb)) isa += "_zbb"
-        if (get(Riscv.RVZbc)) isa += "_zbc"
-        if (get(Riscv.RVZbs)) isa += "_zbs"
+        val riscvPlugin = cpu.host[RiscvPlugin]
+        val isa = s"RV${xlen}${ExtensionManager.getIsaStr(riscvPlugin.isa)}"
         tracer.newCpuMemoryView(hartId, 16, 1 << Decode.STORE_ID_WIDTH)
-        tracer.newCpu(hartId, isa, csrp, get(Global.PHYSICAL_WIDTH), cpu.host.get[PmpService].map(_.getPmpNum).getOrElse(0),  hartId)
+        tracer.newCpu(
+          hartId = hartId,
+          isa = isa,
+          priv = csrp,
+          physWidth = get(Global.PHYSICAL_WIDTH),
+          pmpNum = cpu.host.get[PmpService].map(_.getPmpNum).getOrElse(0),
+          triggerCount = cpu.host.get[PrivilegedPlugin].map(_.p.debugTriggers).getOrElse(0),
+          asidWidth = cpu.host.get[MmuPlugin].map(_.asidWidth).getOrElse(0),
+          memoryViewId = hartId
+        )
         val pc = if(xlen == 32) 0x80000000l else 0x80000000l
         tracer.setPc(hartId, pc)
       }
@@ -578,6 +580,13 @@ class VexiiRiscvProbe(cpu : VexiiRiscv, kb : Option[konata.Backend], var withRvl
         simFailure(f"Vexii hasn't committed anything for too long, $status")
       }
 
+      def flushDueTraps(): Unit = {
+        while (hart.pendingTraps.nonEmpty && hart.pendingTraps.head._3 == hart.microOpRetirePtr) {
+          val (interrupt, cause, _) = hart.pendingTraps.dequeue()
+          backends.foreach(_.trap(hart.hartId, interrupt, cause))
+        }
+      }
+      flushDueTraps()
       while (hart.microOpRetirePtr != hart.microOpAllocPtr && hart.microOp(hart.microOpRetirePtr).done) {
         import hart._
         val uopId = hart.microOpRetirePtr
@@ -624,6 +633,7 @@ class VexiiRiscvProbe(cpu : VexiiRiscv, kb : Option[konata.Backend], var withRvl
           uop.clear()
         }
         hart.microOpRetirePtr = (hart.microOpRetirePtr + 1) & microOpIdMask
+        flushDueTraps()
       }
     }
   }
@@ -640,7 +650,12 @@ class VexiiRiscvProbe(cpu : VexiiRiscv, kb : Option[konata.Backend], var withRvl
 
   def checkTraps(): Unit = {
     for(trap <- proxies.trap) if(trap.fire.toBoolean){
-      backends.foreach(_.trap(hartsIds(trap.hartId), trap.interrupt.toBoolean, trap.cause.toInt))
+      val hart = harts(trap.hartId)
+      if (hart.microOpRetirePtr == hart.microOpAllocPtr && hart.pendingTraps.isEmpty) {
+        backends.foreach(_.trap(hartsIds(trap.hartId), trap.interrupt.toBoolean, trap.cause.toInt))
+      } else {
+        hart.pendingTraps.enqueue((trap.interrupt.toBoolean, trap.cause.toInt, hart.microOpAllocPtr))
+      }
     }
   }
 

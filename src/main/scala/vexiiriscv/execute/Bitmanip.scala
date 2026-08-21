@@ -45,10 +45,6 @@ object ZbPlugin {
       new ZbsPlugin(layer, executeAt, executeAt, formatAt)
     )
 
-    if(zbb) plugins.head.during setup {
-      Riscv.RVZbb.set(true)
-    }
-
     plugins
   }
 }
@@ -65,7 +61,6 @@ class ZbaPlugin(val layer: LaneLayer,
   val RESULT = Payload(SInt(Riscv.XLEN bits))
 
   val logic = during setup new Logic {
-    Riscv.RVZba.set(true)
     awaitBuild()
     import SrcKeys._
     import ZbaPlugin._
@@ -382,7 +377,6 @@ class ZbcPlugin(val layer: LaneLayer,
   val RESULT = Payload(Bits(Riscv.XLEN.get bit))
 
   val logic = during setup new Logic {
-    Riscv.RVZbc.set(true)
     awaitBuild()
     import SrcKeys._
 
@@ -430,7 +424,6 @@ class ZbsPlugin(val layer: LaneLayer,
   val RESULT = Payload(Bits(Riscv.XLEN bits))
 
   val logic = during setup new Logic {
-    Riscv.RVZbs.set(true)
     awaitBuild()
     import SrcKeys._
 

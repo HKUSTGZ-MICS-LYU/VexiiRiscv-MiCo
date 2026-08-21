@@ -14,7 +14,7 @@ import spinal.lib.bus.amba4.axilite.sim.{AxiLite4ReadOnlySlaveAgent, AxiLite4Wri
 import spinal.lib.bus.misc.args.{PeriphSpecs, PeriphTilelinkFiber}
 import spinal.lib.bus.misc.{AddressMapping, SizeMapping}
 import spinal.lib.bus.tilelink
-import spinal.lib.bus.tilelink.coherent.{CacheFiber, HubFiber, SelfFLush}
+import spinal.lib.bus.tilelink.coherent.{CacheFiber, FlushArbiter, FlushParam, HubFiber, SelfFLush}
 import spinal.lib.bus.tilelink.{coherent, fabric}
 import spinal.lib.bus.tilelink.fabric.Node
 import spinal.lib.com.eth.sg.{MacSgFiber, MacSgFiberSpec, MacSgParam}
@@ -31,10 +31,10 @@ import spinal.lib.misc.{InterruptNode, InterruptCtrlFiber}
 import spinal.lib.sim.SparseMemory
 import spinal.lib.{AnalysisUtils, Delay, Flow, ResetCtrlFiber, StreamPipe, master, memPimped, slave, traversableOncePimped}
 import spinal.lib.system.tag.{MemoryConnection, MemoryEndpoint, MemoryEndpointTag, MemoryTransferTag, MemoryTransfers, PMA, VirtualEndpoint}
-import vexiiriscv.{Global, ParamSimple}
+import vexiiriscv.ParamSimple
 import vexiiriscv.compat.{EnforceSyncRamPhase, MultiPortWritesSymplifier}
 import vexiiriscv.execute.ExecuteLanePlugin
-import vexiiriscv.execute.lsu.LsuL1Plugin
+import vexiiriscv.execute.lsu.{LsuL1Plugin, LsuPlugin}
 import vexiiriscv.fetch.{Fetch, FetchL1Plugin, FetchPipelinePlugin, PcPlugin}
 import vexiiriscv.misc.{PrivilegedPlugin, TrapPlugin}
 import vexiiriscv.prediction.GSharePlugin
@@ -188,6 +188,7 @@ class Soc(c : SocConfig) extends Component {
     val mainDataWidth = vexiiParam.memDataWidth
     val withCoherency = vexiiParam.lsuL1Coherency
     val withSupervisor = vexiiParam.privParam.withSupervisor
+    val withHypervisor = vexiiParam.privParam.withHypervisor
     val vexiis = for (hartId <- 0 until cpuCount) yield new TilelinkVexiiRiscvFiber(vexiiParam.plugins(hartId))
     for (vexii <- vexiis) {
       if (vexiiParam.fetchL1Enable) vexii.iBus.setDownConnection { (down, up) =>
@@ -319,6 +320,7 @@ class Soc(c : SocConfig) extends Component {
 
           for (vexii <- vexiis) {
             vexii.bind(msi, 1)
+            if (withHypervisor && vexiiParam.privParam.withGuestImsic) vexii.bind(msi, -3)
           }
         }
       }
@@ -461,6 +463,13 @@ class Soc(c : SocConfig) extends Component {
           (cBus << dma.filter.down).setDownConnection(a = StreamPipe.FULL)
         }
 
+        val llcLsuPlugins = vexiis.flatMap(_.plugins.collect {
+          case p : LsuPlugin if p.withLlcFlush => p
+        })
+        assert(llcLsuPlugins.isEmpty || withL2, "Hub-only coherent Zicbom is unsupported; enable L2 so CBO can use the coherent CacheFiber FlushBus.")
+        val llcFlushAddressWidth = vexiiParam.xlen max vexiiParam.physicalWidth
+        val flushParam = llcLsuPlugins.nonEmpty generate FlushParam(llcFlushAddressWidth, log2Up(llcLsuPlugins.size))
+
         val hub = (withCoherency && !withL2) generate new Area {
           val hub = new HubFiber()
           hub.up << cBus
@@ -470,7 +479,7 @@ class Soc(c : SocConfig) extends Component {
         }
 
         val l2 = (withCoherency && withL2) generate new Area {
-          val cache = new CacheFiber(withCtrl = false)
+          val cache = new CacheFiber(withCtrl = false, flushBusParam = flushParam)
           cache.parameter.cacheWays = l2Ways
           cache.parameter.cacheBytes = l2Bytes
           cache.parameter.selfFlush = selfFlush
@@ -482,6 +491,19 @@ class Soc(c : SocConfig) extends Component {
           cache.up.setUpConnection(a = StreamPipe.FULL, c = StreamPipe.FULL, d = StreamPipe.FULL)
           cache.down.setDownConnection(d = StreamPipe.S2M)
           cache.down.forceDataWidth(mainDataWidth)
+          if(llcLsuPlugins.nonEmpty) {
+            val arbiter = new FlushArbiter(flushParam, llcLsuPlugins.size)
+            cache.flush.cmd << arbiter.io.output.cmd
+            arbiter.io.output.rsp << cache.flush.rsp
+
+            Fiber build new Area {
+              val llcBuses = llcLsuPlugins.map(_.logic.llcBus)
+              for((input, bus) <- (arbiter.io.inputs, llcBuses).zipped) {
+                input.cmd << bus.cmd
+                bus.rsp << input.rsp
+              }
+            }
+          }
           mBus << cache.down
         }
 
@@ -604,7 +626,7 @@ object PythonArgsGen extends App{
 
   vexiiParam.lsuL1Coherency = socConfig.cpuCount > 1 || socConfig.withDma
 
-  val isaMap = withISA.map(s => s"'$s'").mkString("{", ", ", "}")
+  val isaMap = extension.getIsaNameArray(includeIgnored = true).map(s => s"'$s'").mkString("{", ", ", "}")
 
   import java.io.PrintWriter
 

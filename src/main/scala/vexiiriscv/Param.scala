@@ -15,7 +15,7 @@ import vexiiriscv.execute.cfu.{CfuBusParameter, CfuPlugin, CfuPluginEncoding}
 import vexiiriscv.execute.fpu.{FpuAddSharedParam, FpuMulParam}
 import vexiiriscv.execute.lsu._
 import vexiiriscv.fetch.{FetchCachelessAxi4Plugin, FetchCachelessPlugin, FetchCachelessWishbonePlugin, FetchL1Axi4Plugin, FetchL1Plugin, FetchL1WishbonePlugin, PrefetcherNextLinePlugin}
-import vexiiriscv.memory.{MmuPortParameter, MmuSpec, MmuStorageLevel, MmuStorageParameter, PmpParam, PmpPlugin, PmpPortParameter}
+import vexiiriscv.memory.{MmuPortParameter, MmuSpec, MmuStorageLevel, MmuStorageParameter, PmpParam, PmpPlugin, PmpPortParameter, ShadowMmuPlugin, TranslatedDBusAccessPlugin}
 import vexiiriscv.misc._
 import vexiiriscv.prediction.{LearnCmd, LearnPlugin}
 import vexiiriscv.riscv.{FloatRegFile, IntRegFile}
@@ -23,8 +23,10 @@ import vexiiriscv.schedule.DispatchPlugin
 import vexiiriscv.test.WhiteboxerPlugin
 
 import java.security.MessageDigest
-import scala.collection.mutable.{ArrayBuffer, Set}
+import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
+import vexiiriscv.fetch.FetchCachelessTimingParameter
+import vexiiriscv.fetch.FetchL1TimingParameter
 
 
 object FetchBusEnum extends Enumeration {
@@ -99,7 +101,7 @@ object ParamSimple{
  */
 class ParamSimple() {
   var xlen = 32
-  var withISA = Set[String]("i", "zicsr", "zifencei")
+  var extension = ExtensionManager(Set("zicsr", "zifencei"))
   var withAlignerBuffer = false
   var withDispatcherBuffer = false
   var hartCount = 1
@@ -180,6 +182,7 @@ class ParamSimple() {
   var mulKeepSrc = false
   var withCfu = false
   var gshareBytes = 4 KiB
+  var recordHtinst = false
   val prefetcherRptParam = new PrefetcherRptParam()
 
   // var withMiCo = false
@@ -275,10 +278,92 @@ class ParamSimple() {
     rspAt = 1
   )
 
+  def fetchCachelessTiming = FetchCachelessTimingParameter(
+    addressAt = 0,
+    pmaAt     = 0,
+    forkAt    = fetchForkAt,
+    joinAt    = fetchForkAt+1 //You can for instance allow the external memory to have more latency by changing this
+  )
+  def fetchCachelessHypervisorTiming = FetchCachelessTimingParameter(
+    addressAt = 0,
+    pmaAt     = 1,
+    forkAt    = fetchForkAt+1,
+    joinAt    = fetchForkAt+2 //You can for instance allow the external memory to have more latency by changing this
+  )
 
-  def alignerPluginFetchAt = fetchL1Enable.mux(2, 1+fetchForkAt)
+  def fetchL1Timing = FetchL1TimingParameter(
+    readAt      = 0,
+    hitsAt      = 1,
+    hitAt       = 1,
+    bankMuxesAt = 1,
+    bankMuxAt   = 2,
+    ctrlAt      = 2
+  )
+  def fetchL1HypervisorTiming = FetchL1TimingParameter(
+    readAt      = 0,
+    hitsAt      = 2,
+    hitAt       = 2,
+    bankMuxesAt = 2,
+    bankMuxAt   = 3,
+    ctrlAt      = 3
+  )
+
+  def lsuCachelessTiming = LsuCachelessTimingParameter(
+    addressAt = 0,
+    triggerAt = 0,
+    pmaAt     = lsuPmaAt,
+    forkAt    = lsuForkAt+0,
+    joinAt    = lsuForkAt+1,
+    wbAt      = 2 //TODO
+  )
+  def lsuCachelessHypervisorTiming = LsuCachelessTimingParameter(
+    addressAt = 0,
+    triggerAt = 1,
+    pmaAt     = lsuPmaAt+1,
+    forkAt    = lsuForkAt+1,
+    joinAt    = lsuForkAt+2,
+    wbAt      = 3 //TODO
+  )
+
+  def lsuTiming = LsuTimingParameter(
+    addressAt = 0,
+    pmaAt = 1,
+    triggerAt = 1,
+    ctrlAt = 2,
+    wbAt = 2,
+    addressLength = 1
+  )
+  def lsuHypervisorTiming = LsuTimingParameter(
+    addressAt = 0,
+    pmaAt = 2,
+    triggerAt = 2,
+    ctrlAt = 3,
+    wbAt = 3,
+    addressLength = 2
+  )
+
+  def lsuL1Timing = LsuL1TimingParameter(
+    bankReadAt = 0,
+    wayReadAt = 0,
+    hitsAt = 1,
+    hitAt = 2,
+    bankMuxesAt = 1,
+    bankMuxAt = 2,
+    ctrlAt = 2
+  )
+  def lsuL1HypervisorTiming = LsuL1TimingParameter(
+    bankReadAt = 0,
+    wayReadAt = 0,
+    hitsAt = 2,
+    hitAt = 3,
+    bankMuxesAt = 2,
+    bankMuxAt = 3,
+    ctrlAt = 3
+  )
+
+  def alignerPluginFetchAt = fetchL1Enable.mux(2, 1+fetchForkAt) + extension.withRvh.toInt
   def fetchMemDataWidth = 32*decoders max fetchMemDataWidthMin
-  def lsuMemDataWidth = xlen max lsuMemDataWidthMin max withRvd.mux(64, 0)
+  def lsuMemDataWidth = xlen max lsuMemDataWidthMin max extension.withRvd.mux(64, 0)
   def memDataWidth = List(fetchMemDataWidth, lsuMemDataWidth).max
 
   //  Debug modifiers
@@ -461,6 +546,7 @@ class ParamSimple() {
         case e: Long => md ++= s" $e"
         case e: BigInt => md ++= s" $e"
         case e: String => md ++= s" $e"
+        case e: ExtensionManager => md ++= s" ${e.getIsaStr(includeIgnored = true)}"
         case e : Product => md ++= s" $e"
         case e: Set[_] => md ++= s" ${e.map(_.toString).toSeq.sorted.mkString(" ")}"
         case e => {
@@ -476,82 +562,36 @@ class ParamSimple() {
     Math.abs(md.toString.hashCode())
   }
 
-  def addISA(exts: String*): Unit = withISA ++= exts.map(_.toLowerCase())
-  def removeISA(exts: String*): Unit = withISA --= exts.map(_.toLowerCase())
-  def checkISA(exts: String*) = exts.map(withISA contains _.toLowerCase()).reduce(_ && _)
+  def addISA(exts: String*): Unit = extension.add(exts :_*)
+  def removeISA(exts: String*): Unit = extension.remove(exts :_*)
+  def checkISA(exts: String*) = extension.check(exts :_*)
 
-  def withRve = checkISA("e")
-  def withRva = checkISA("a")
-  def withRvf = checkISA("f")
-  def withRvd = checkISA("f", "d")
-  def withRvc = checkISA("c")
-  def withRvcbm = checkISA("zicbom")
   def withRvZknAes = checkISA("zkne") || checkISA("zknd")
-  def withRvZba = checkISA("zba")
-  def withRvZbb = checkISA("zbb")
-  def withRvZbc = checkISA("zbc")
-  def withRvZbs = checkISA("zbs")
-  def withRvb = checkISA("zba", "zbb", "zbc", "zbs")
-  def withSscofpmf = checkISA("sscofpmf")
-  def withSstc = checkISA("sstc")
-  def withSxaia = checkISA("smaia") || checkISA("ssaia")
 
-  def withMul = checkISA("m") || checkISA("zmmul")
-  def withDiv = checkISA("m")
-  def withMmu = checkISA("s") && !disableMmu
-  def withRdTime = checkISA("zicntr")
-  def withSupervisor = checkISA("s")
-  def withUser = checkISA("u")
-  def withHypervisor = checkISA("h")
-  def withIndirectCsr = checkISA("smcsrind") || checkISA("sscsrind")
-  def withPerformanceCounters = checkISA("zihpm") || checkISA("zicntr")
-  def withPerformanceScountovf = checkISA("sscofpmf")
-  def withInterrutpFilter = checkISA("ssaia")
+  def withMmu = extension.withSupervisor && !disableMmu
 
   def fixIsaParams() = {
-    if(checkISA("h")) addISA("s")
-    if(checkISA("s")) addISA("u")
-
-    if(checkISA("g")) addISA("i", "m", "a", "f", "d", "s", "u")
-    if(checkISA("b")) {
-      addISA("zba", "zbb", "zbc", "zbs")
-      removeISA("b")
+    if(privParam.imsicInterrupts > 0) {
+      addISA("smaia")
+      if(extension.withSupervisor) addISA("ssaia")
     }
+    if(!withMmu) removeISA("svade")
+    extension.finialize(xlen)
+    println(s"ISA extensions: ${extension.getIsaNameArray().mkString(", ")}")
 
-    if(privParam.imsicInterrupts > 0) addISA("smaia", "ssaia")
-    if(withSxaia) addISA("smcsrind", "sscsrind")
-
-    if(!checkISA("s")) {
-      removeISA("sscsrind", "ssaia", "sstc")
-    }
-    if(checkISA("zihpm") || withSstc) addISA("zicntr")
-
-    if(withSupervisor) privParam.withSupervisor = true
-    if(withHypervisor) privParam.withHypervisor = true
-    if(withUser) privParam.withUser = true
-    if(withSstc) privParam.withSSTC = true
-    if(withRdTime) privParam.withRdTime = true
-    if(withInterrutpFilter) privParam.withInterrutpFilter = true
-    if(withRvc) withAlignerBuffer = true
+    if(extension.withSupervisor) privParam.withSupervisor = true
+    if(extension.withHypervisor) privParam.withHypervisor = true
+    if(extension.withUser) privParam.withUser = true
+    if(extension.withSstc) privParam.withSSTC = true
+    if(extension.withRdTime) privParam.withRdTime = true
+    if(extension.withSsaia) privParam.withSsaia = true
+    if(extension.withRvc) withAlignerBuffer = true
   }
 
   // Generate a human readable name from most of the supported configuration
   def getName() : String = {
     def opt(that : Boolean, v : String) = that.mux(v, "")
-    var isa = s"rv${xlen}"
-    if (withRve) isa += "e" else isa += "i"
-    if (withMul) isa += s"m"
-    if (withRva) isa += "a"
-    if (withRvf) isa += "f"
-    if (withRvd) isa += "d"
-    if (withRvc) isa += "c"
-    if (withRvZba) isa += "Zba"
-    if (withRvZbb) isa += "Zbb"
-    if (withRvZbc) isa += "Zbc"
-    if (withRvZbs) isa += "Zbs"
-    if (withIndirectCsr) isa += "Smcsrind" + privParam.withSupervisor.mux("Sscsrind", "")
-    if (privParam.withSupervisor) isa += "s"
-    if (privParam.withUser) isa += "u"
+    val isa = s"rv${xlen}${extension.getIsaStr()}"
     val r = new ArrayBuffer[String]()
     r += isa
     r += s"d${decoders}At${decoderAt}"
@@ -570,9 +610,10 @@ class ParamSimple() {
     if (relaxedBranch) r += "rbra"
     if (relaxedShift) r += "rsft"
     if (relaxedSrc) r += "rsrc"
-    if (withPerformanceCounters) r += s"pc$additionalPerformanceCounters"
+    if (extension.withPerformanceCounters) r += s"pc$additionalPerformanceCounters"
+    if (withMmu) r += s"asid$asidWidth"
     if (withIterativeShift) r += "isft"
-    if (withDiv) r += s"d${divRadix}${divImpl}${if(divArea)"Area" else ""}"
+    if (extension.withDiv) r += s"d${divRadix}${divImpl}${if(divArea)"Area" else ""}"
     if (privParam.withDebug) r += s"pdbg"
     if (embeddedJtagTap) r += s"jtagt"
     if (embeddedJtagInstruction) r += s"jtagi"
@@ -612,8 +653,9 @@ class ParamSimple() {
       fpuWbAt = 1
     }
     opt[Seq[String]]("with-isa").unbounded() action { (v, c) => addISA(v: _*) }
+    opt[Seq[String]]("without-isa").unbounded() action { (v, c) => removeISA(v: _*) }
     opt[Unit]("with-rvm") action { (v, c) => addISA("m") }
-    opt[Unit]("with-rve") action { (v, c) => addISA("e"); removeISA("i") }
+    opt[Unit]("with-rve") action { (v, c) => addISA("e") }
     opt[Unit]("with-rva") action { (v, c) => addISA("a") }
     opt[Unit]("with-rvf") action { (v, c) => addISA("f") }
     opt[Unit]("with-rvd") action { (v, c) => addISA("f", "d") }
@@ -628,6 +670,7 @@ class ParamSimple() {
     opt[Unit]("with-rvZknAes") action { (v, c) => addISA("zkne", "zknd") }
     opt[Unit]("with-sxaia") action { (v, c) => addISA("smaia", "ssaia") }
     opt[Int]("imsic-interrupt-number") action { (v, c) => privParam.imsicInterrupts = v }
+    opt[Int]("guest-external-interrupt-file-number") action { (v, c) => privParam.guestExternalInterruptFiles = v }
     opt[Unit]("with-whiteboxer-outputs") action { (v, c) => withWhiteboxerOutputs = true }
     opt[Unit]("with-hart-id-input") action { (v, c) => withHartIdInput = true }
     opt[Unit]("with-hart-id-input-defaulted") action { (v, c) => privParam.withHartIdInputDefaulted = true }
@@ -635,14 +678,15 @@ class ParamSimple() {
     opt[Unit]("fpu-ignore-subnormal") action { (v, c) => fpuIgnoreSubnormal = true }
     opt[Unit]("with-aligner-buffer").unbounded() action { (v, c) => withAlignerBuffer = true }
     opt[Unit]("with-dispatcher-buffer") action { (v, c) => withDispatcherBuffer = true }
+    opt[Unit]("with-hypervisor") action { (v, c) => addISA("h", "s", "u") }
     opt[Unit]("with-supervisor") action { (v, c) => addISA("s", "u") }
     opt[Unit]("with-user") action { (v, c) => addISA("u") }
-    opt[Unit]("without-mmu") action { (v, c) => disableMmu = false }
+    opt[Unit]("without-mmu") action { (v, c) => disableMmu = true }
     opt[Unit]("without-mul") action { (v, c) => removeISA("m", "zmmul") }
     opt[Unit]("without-div") action { (v, c) => if(checkISA("m")) {removeISA("m"); addISA("zmmul")} }
     opt[Unit]("with-tester-plugin") action { (v, c) => withTesterPlugin = true }
-    opt[Unit]("with-mul") action { (v, c) => addISA("zmmul") }
-    opt[Unit]("with-div") action { (v, c) => addISA("m") }
+    opt[Unit]("with-mul").unbounded() action { (v, c) => addISA("zmmul") }
+    opt[Unit]("with-div").unbounded() action { (v, c) => addISA("m") }
     opt[Unit]("with-gshare") action { (v, c) => withGShare = true }
     opt[Unit]("with-btb") action { (v, c) => withBtb = true }
     opt[Unit]("with-ras") action { (v, c) => withRas = true }
@@ -718,6 +762,8 @@ class ParamSimple() {
     opt[Unit]("with-cfu") action { (v, c) => withCfu = true }
     opt[Int]("asid-width") action{ (v,c) => asidWidth = v }
     opt[Int]("gshare-bytes") action{ (v,c) => gshareBytes = v }
+    opt[Unit]("record-htinst") action{ (v, c) => recordHtinst = true }
+    opt[Int]("injected-guest-interrupt-width") action { (v, c) => privParam.injectedInterruptWidth = v }
     opt[Unit]("dual-issue") action { (v, c) =>
       decoders = 2
       lanes = 2
@@ -758,15 +804,25 @@ class ParamSimple() {
     if(withMmu && lsuL1Enable) assert(lsuL1Sets <= 64, "MMU require not more than 64 sets in the LSU L1")
     if(withMmu && fetchL1Enable) assert(fetchL1Sets <= 64, "MMU require not more than 64 sets in the FETCH L1")
 
-    val intWritebackAt = 2 //Alias for "trap at" as well
+    val intWritebackAt = 2 + extension.withRvh.toInt //Alias for "trap at" as well
 
-    plugins += new riscv.RiscvPlugin(xlen, hartCount, rvf = withRvf, rvd = withRvd, rvc = withRvc, rve = withRve)
+    plugins += new riscv.RiscvPlugin(xlen, hartCount, isa = extension.getIsaNameArray(includeIgnored = true).toSet)
+    if (withMmu) plugins += new TranslatedDBusAccessPlugin()
     withMmu match {
       case false => plugins += new vexiiriscv.memory.StaticTranslationPlugin(physicalWidth)
       case true => plugins += new vexiiriscv.memory.MmuPlugin(
         spec = if (xlen == 32) MmuSpec.sv32 else MmuSpec.sv39,
         physicalWidth = physicalWidth,
-        asidWidth = asidWidth
+        asidWidth = asidWidth,
+        withGuestSfenceCheck = extension.withHypervisor
+      )
+    }
+    (extension.withRvh && withMmu) match {
+      case false => plugins += new vexiiriscv.memory.StaticTranslationPlugin(physicalWidth, 1)
+      case true => plugins += new vexiiriscv.memory.ShadowMmuPlugin(
+        spec = if (xlen == 32) MmuSpec.sv32 else MmuSpec.sv39,
+        physicalWidth = physicalWidth,
+        vmidWidth = 0 /* TODO */
       )
     }
 
@@ -803,8 +859,8 @@ class ParamSimple() {
       plugins += new prediction.HistoryPlugin()
     }
     def shifter(layer: LaneLayer, shiftAt: Int = 0, formatAt: Int = 0) = withIterativeShift match {
-      case false => new BarrelShifterPlugin(layer, with_slli_uw=withRvZba, shiftAt=shiftAt, formatAt=formatAt)
-      case true => new IterativeShifterPlugin(layer, with_slli_uw=withRvZba, shiftAt=shiftAt, formatAt=formatAt)
+      case false => new BarrelShifterPlugin(layer, with_slli_uw=extension.withZba, shiftAt=shiftAt, formatAt=formatAt)
+      case true => new IterativeShifterPlugin(layer, with_slli_uw=extension.withZba, shiftAt=shiftAt, formatAt=formatAt)
     }
 
 
@@ -813,10 +869,12 @@ class ParamSimple() {
     plugins += new fetch.FetchPipelinePlugin()
     if(!fetchL1Enable) {
       plugins += new fetch.FetchCachelessPlugin(
-        forkAt = fetchForkAt,
-        joinAt = fetchForkAt+1, //You can for instance allow the external memory to have more latency by changing this
+        timingParameter = extension.withRvh match {
+          case true => fetchCachelessHypervisorTiming
+          case false => fetchCachelessTiming
+        },
         wordWidth = fetchMemDataWidth,
-        pmpPortParameter = fetchNoL1PmpParam,
+        pmpPortParameter = fetchNoL1PmpParam.offset(extension.withRvh.toInt),
         translationStorageParameter = fetchTsp,
         translationPortParameter = withMmu match {
           case false => null
@@ -852,7 +910,11 @@ class ParamSimple() {
           case false => null
           case true => fetchTpp
         },
-        pmpPortParameter = fetchL1PmpParam
+        pmpPortParameter = fetchL1PmpParam.offset(extension.withRvh.toInt),
+        timingParameter = extension.withRvh match {
+          case true => fetchL1HypervisorTiming
+          case false => fetchL1Timing
+        }
       )
 
       fetchL1Prefetch match {
@@ -887,7 +949,7 @@ class ParamSimple() {
 
     plugins += new regfile.RegFilePlugin(
       spec = riscv.IntRegFile,
-      physicalDepth = if(withRve) 16 else 32,
+      physicalDepth = if(extension.withRve) 16 else 32,
       preferedWritePortForInit = "lane0",
       syncRead = regFileSync,
       dualPortRam = regFileDualPortRam,
@@ -956,10 +1018,10 @@ class ParamSimple() {
 
     plugins ++= ZbPlugin.make(
       early0,
-      zba = withRvZba,
-      zbb = withRvZbb,
-      zbc = withRvZbc,
-      zbs = withRvZbs,
+      zba = extension.withZba,
+      zbb = extension.withZbb,
+      zbc = extension.withZbc,
+      zbs = extension.withZbs,
       executeAt=0,
       formatAt=0
     )
@@ -973,14 +1035,14 @@ class ParamSimple() {
     if(!lsuL1Enable) {
       plugins += new LsuCachelessPlugin(
         layer     = early0,
-        withAmo   = withRva,
+        withZaamo = extension.withZaamo,
+        withZalrsc = extension.withZalrsc,
         withSpeculativeLoadFlush = true,
-        addressAt = 0,
-        pmaAt     = lsuPmaAt,
-        forkAt    = lsuForkAt+0,
-        joinAt    = lsuForkAt+1,
-        wbAt      = 2, //TODO
-        pmpPortParameter = lsuNoL1PmpParam,
+        timingParameter = extension.withRvh match {
+          case true => lsuCachelessHypervisorTiming
+          case false => lsuCachelessTiming
+        },
+        pmpPortParameter = lsuNoL1PmpParam.offset(extension.withRvh.toInt),
         translationStorageParameter = lsuTsp,
         translationPortParameter = withMmu match {
           case false => null
@@ -994,16 +1056,22 @@ class ParamSimple() {
       )
     }
     if(lsuL1Enable){
+      val needLlc = extension.withZicbom && (withRvcbmLlc || lsuL1Coherency)
       plugins += new LsuPlugin(
+        timingParameter = extension.withRvh match {
+          case true => lsuHypervisorTiming
+          case false => lsuTiming
+        },
         layer = early0,
-        withRva = withRva,
+        withZaamo = extension.withZaamo,
+        withZalrsc = extension.withZalrsc,
         storeRs2At = storeRs2Late.mux(2, 0),
         storeBufferSlots = lsuStoreBufferSlots,
         storeBufferOps = lsuStoreBufferOps,
         softwarePrefetch = lsuSoftwarePrefetch,
-        withCbm = withRvcbm,
-        withLlcFlush = withRvcbmLlc,
-        pmpPortParameter = fetchL1PmpParam,
+        withCbm = extension.withZicbom,
+        withLlcFlush = needLlc,
+        pmpPortParameter = lsuL1PmpParam.offset(extension.withRvh.toInt),
         translationStorageParameter = lsuTsp,
         translationPortParameter = withMmu match {
           case false => null
@@ -1013,16 +1081,20 @@ class ParamSimple() {
       plugins += new LsuL1Plugin(
         lane           = lane0,
         memDataWidth   = lsuMemDataWidth,
-        cpuDataWidth   = xlen max withRvd.mux(64, 0),
+        cpuDataWidth   = xlen max extension.withRvd.mux(64, 0),
         refillCount    = lsuL1RefillCount,
         writebackCount = lsuL1WritebackCount,
         setCount       = lsuL1Sets,
         wayCount       = lsuL1Ways,
         withBypass     = withLsuBypass,
         withCoherency  = lsuL1Coherency,
-        withCbm        = withRvcbm && !withRvcbmLlc,
+        withCbm        = extension.withZicbom && !needLlc,
         bootMemClear = bootMemClear,
-        tagsReadAsync  = lsuL1TagsReadAsync
+        tagsReadAsync  = lsuL1TagsReadAsync,
+        timingParameter = extension.withRvh match {
+          case true => lsuL1HypervisorTiming
+          case false => lsuL1Timing
+        }
       )
 
       lsuHardwarePrefetch match {
@@ -1040,10 +1112,10 @@ class ParamSimple() {
       }
     }
 
-    if(withMul) {
+    if(extension.withMul) {
       plugins += new MulPlugin(early0, keepMulSrc = mulKeepSrc, mulAt = relaxedMulInputs.toInt)
     }
-    if(withDiv) {
+    if(extension.withDiv) {
       plugins += new RsUnsignedPlugin("lane0")
       plugins += new DivPlugin(
         layer = early0,
@@ -1064,11 +1136,17 @@ class ParamSimple() {
     }
 
     plugins += new CsrRamPlugin()
-    if(withPerformanceCounters) plugins += new PerformanceCounterPlugin(additionalCounterCount = additionalPerformanceCounters, withScountovf = withSscofpmf)
+    if(extension.withPerformanceCounters) plugins += new PerformanceCounterPlugin(
+      additionalCounterCount  = additionalPerformanceCounters,
+      withSmcntrpmf           = extension.withSmcntrpmf,
+      withScountovf           = extension.withSscofpmf,
+      withShlcofideleg        = extension.withShlcofideleg
+    )
     plugins += new CsrAccessPlugin(early0, writeBackKey =  if(lanes == 1) "lane0" else "lane1")
-    if(withIndirectCsr) plugins += new IndirectCsrPlugin(checkISA("sscsrind"))
+    if(extension.withIndirectCsr) plugins += new IndirectCsrPlugin(extension.withSscsrind, privParam.withHypervisor && extension.withSscsrind)
+    if(privParam.withImsic) plugins += new ImsicPlugin(privParam)
     plugins += new PrivilegedPlugin(privParam, withHartIdInput.mux(null, hartId until hartId+hartCount))
-    plugins += new TrapPlugin(trapAt = intWritebackAt)
+    plugins += new TrapPlugin(trapAt = intWritebackAt, recordHtinst = recordHtinst)
     if(withTesterPlugin) plugins += new TesterPlugin()
     plugins += new EnvPlugin(early0, executeAt = 0)
     if(embeddedJtagTap || embeddedJtagInstruction) plugins += new EmbeddedRiscvJtag(
@@ -1094,10 +1172,10 @@ class ParamSimple() {
       plugins += new BranchPlugin(late0, aluAt = lateAluAt, jumpAt = lateAluAt/*+relaxedBranch.toInt*/, wbAt = lateAluAt, withJalr = false)
       plugins ++= ZbPlugin.make(
         late0,
-        zba = withRvZba,
-        zbb = withRvZbb,
-        zbc = withRvZbc,
-        zbs = withRvZbs,
+        zba = extension.withZba,
+        zbb = extension.withZbb,
+        zbc = extension.withZbc,
+        zbs = extension.withZbs,
         executeAt=lateAluAt,
         formatAt=lateAluAt
       )
@@ -1118,10 +1196,10 @@ class ParamSimple() {
       plugins += new BranchPlugin(early1, aluAt = 0, jumpAt = relaxedBranch.toInt, wbAt = 0)
       plugins ++= ZbPlugin.make(
         early1,
-        zba = withRvZba,
-        zbb = withRvZbb,
-        zbc = withRvZbc,
-        zbs = withRvZbs,
+        zba = extension.withZba,
+        zbb = extension.withZbb,
+        zbc = extension.withZbc,
+        zbs = extension.withZbs,
         executeAt=0,
         formatAt=0
       )
@@ -1135,10 +1213,10 @@ class ParamSimple() {
         plugins += new BranchPlugin(late1, aluAt = lateAluAt, jumpAt = lateAluAt/*+relaxedBranch.toInt*/, wbAt = lateAluAt, withJalr = false)
         plugins ++= ZbPlugin.make(
           late1,
-          zba = withRvZba,
-          zbb = withRvZbb,
-          zbc = withRvZbc,
-          zbs = withRvZbs,
+          zba = extension.withZba,
+          zbb = extension.withZbb,
+          zbc = extension.withZbc,
+          zbs = extension.withZbs,
           executeAt=lateAluAt,
           formatAt=lateAluAt
         )
@@ -1155,7 +1233,7 @@ class ParamSimple() {
     }
 
     // FPU
-    if (withRvf || withRvd) {
+    if (extension.withRvf || extension.withRvd) {
       plugins += new regfile.RegFilePlugin(
         spec = riscv.FloatRegFile,
         physicalDepth = 32,
@@ -1177,7 +1255,7 @@ class ParamSimple() {
       plugins += new execute.fpu.FpuCmpPlugin(early0)
       plugins += new execute.fpu.FpuF2iPlugin(early0)
       plugins += new execute.fpu.FpuMvPlugin(early0, floatWbAt = 2)
-      if(withRvd) plugins += new execute.fpu.FpuXxPlugin(early0)
+      if(extension.withRvd) plugins += new execute.fpu.FpuXxPlugin(early0)
       plugins += new execute.fpu.FpuDivPlugin(early0)
       plugins += new execute.fpu.FpuPackerPlugin(lane0, ignoreSubnormal = fpuIgnoreSubnormal, wbAt = fpuWbAt)
     }

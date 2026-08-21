@@ -162,11 +162,11 @@ class WhiteboxerPlugin(withOutputs : Boolean) extends FiberPlugin{
 
       val lcp = host.get[LsuCachelessPlugin] map (p => new Area {
         val c = p.logic.wbCtrl
-        fire := c.down.isFiring && c(AguPlugin.SEL) && c(AguPlugin.LOAD) && !c(TRAP) && !c(p.logic.onPma.RSP).io
+        fire := c.down.isFiring && c(AguPlugin.SEL) && (c(AguPlugin.LOAD) || c(AguPlugin.EXECUTE)) && !c(TRAP) && !c(p.logic.onPma.RSP).io
         hartId := c(Global.HART_ID)
         uopId := c(Decode.UOP_ID)
         size := c(AguPlugin.SIZE).resized
-        address := c(p.logic.tpk.TRANSLATED)
+        address := c(p.logic.stpk.TRANSLATED)
         data := host.find[IntFormatPlugin](_.lane == p.layer.lane).logic.stages.find(_.ctrlLink == c.ctrlLink).get.wb.payload.resized
         if(p.logic.fpwb.nonEmpty) when(p.logic.fpwb.get.valid){
           data := p.logic.fpwb.get.payload.asSInt.resize(widthOf(data)).asBits.resized
@@ -176,7 +176,7 @@ class WhiteboxerPlugin(withOutputs : Boolean) extends FiberPlugin{
 
       val lp = host.get[LsuPlugin] map (p => new Area {
         val c = p.logic.onWb
-        fire := c.down.isFiring && c(AguPlugin.SEL) && c(AguPlugin.LOAD) && !c(p.logic.LSU_PREFETCH) && !c(TRAP) && !c(p.logic.onPma.IO)
+        fire := c.down.isFiring && c(AguPlugin.SEL) && (c(AguPlugin.LOAD) || c(AguPlugin.EXECUTE)) && !c(p.logic.LSU_PREFETCH) && !c(TRAP) && !c(p.logic.onPma.IO)
         hartId := c(Global.HART_ID)
         uopId := c(Decode.UOP_ID)
         size := c(AguPlugin.SIZE).resized
@@ -209,7 +209,7 @@ class WhiteboxerPlugin(withOutputs : Boolean) extends FiberPlugin{
         address := bus.cmd.address
         data := bus.cmd.data
         storeId := c(Decode.UOP_ID).resized
-        amo := p.withAmo.mux(bus.cmd.amoEnable, False)
+        amo := p.withAtomics.mux(bus.cmd.amoEnable, False)
       })
 
       val lp = host.get[LsuPlugin] map (p => new Area {
@@ -235,14 +235,14 @@ class WhiteboxerPlugin(withOutputs : Boolean) extends FiberPlugin{
 
       val lcp = host.get[LsuCachelessPlugin] map (p => new Area {
         val c = p.logic.wbCtrl
-        fire := c.down.isFiring && c(AguPlugin.SEL) && (c(AguPlugin.ATOMIC) && !c(AguPlugin.LOAD)) && !c(TRAP)
+        fire := c.down.isFiring && c(AguPlugin.SEL) && (c(AguPlugin.ATOMIC) && !(c(AguPlugin.LOAD) || c(AguPlugin.EXECUTE))) && !c(TRAP)
         hartId := c(Global.HART_ID)
         uopId := c(Decode.UOP_ID)
         miss := c(p.logic.onJoin.SC_MISS)
       })
       val lp = host.get[LsuPlugin] map (p => new Area {
         val c = p.logic.onWb
-        fire := c.down.isFiring && c(AguPlugin.SEL) && (c(AguPlugin.ATOMIC) && !c(AguPlugin.LOAD)) && !c(TRAP)
+        fire := c.down.isFiring && c(AguPlugin.SEL) && (c(AguPlugin.ATOMIC) && !(c(AguPlugin.LOAD) || c(AguPlugin.EXECUTE))) && !c(TRAP)
         hartId := c(Global.HART_ID)
         uopId := c(Decode.UOP_ID)
         miss := c(p.logic.onCtrl.SC_MISS)
