@@ -314,7 +314,7 @@ class BitQuantNormalizedLane(p: BitQuantLaneParameter) extends Component {
   val signReg = Reg(Bool())
   val alignedMagnitudeReg = Reg(UInt(q8ProductWidth bits))
   val thresholdReg = Reg(UInt(q8ProductWidth bits))
-  val absSignificandReg = Reg(UInt(significandWidth bits))
+  val stepReg = Reg(UInt(q8ProductWidth bits))
   val qMagReg = Reg(UInt((p.maxQuantBits - 1) max 1 bits))
   val bitIndexReg = Reg(UInt(log2Up(p.maxQuantBits) max 1 bits))
 
@@ -386,21 +386,19 @@ class BitQuantNormalizedLane(p: BitQuantLaneParameter) extends Component {
   val initialThreshold = (initialThresholdWide - io.absParts.significand.resize(q8CompareWidth)).resize(q8ProductWidth)
 
   // One SAR iteration: compare the pre-aligned magnitude, then update the
-  // threshold by the current binary-search step.  qMag is shifted every
-  // cycle; this is the compact bit sequence that becomes the final level.
-  val step = (absSignificandReg.resize(q8ProductWidth) |<< bitIndexReg).resize(q8ProductWidth)
+  // threshold by the current binary-search step.  stepReg is shifted by one
+  // fixed bit per iteration, so the feedback path has no variable shifter.
   val keep = alignedMagnitudeReg >= thresholdReg
   val qNext = UInt(p.maxQuantBits bits)
   qNext := (qMagReg.resize(p.maxQuantBits) |<< 1).resize(p.maxQuantBits)
   qNext(0) := keep
 
-  val thresholdNext = UInt(q8ProductWidth bits)
-  thresholdNext := thresholdReg
-  when(keep) {
-    thresholdNext := (thresholdReg + step).resize(q8ProductWidth)
-  } otherwise {
-    thresholdNext := (thresholdReg - step).resize(q8ProductWidth)
-  }
+  // A + (B xor sub) + sub is the conventional single-adder ADD/SUB form.
+  // With sub=0 this is threshold + step; with sub=1 it is threshold - step.
+  val thresholdOperand = Mux(keep, stepReg, ~stepReg)
+  val thresholdAddSub =
+    (thresholdReg.asSInt + thresholdOperand.asSInt + Mux(keep, S(0), S(1))).asUInt
+  val thresholdNext = thresholdAddSub.resize(q8ProductWidth)
 
   val q8Code = Bits(p.maxQuantBits bits)
   q8Code := valueSign.mux(
@@ -430,7 +428,7 @@ class BitQuantNormalizedLane(p: BitQuantLaneParameter) extends Component {
           signReg := valueSign
           alignedMagnitudeReg := alignedMagnitude
           thresholdReg := initialThreshold
-          absSignificandReg := io.absParts.significand
+          stepReg := (io.absParts.significand.resize(q8ProductWidth) |<< q8StartBit).resize(q8ProductWidth)
           qMagReg := 0
           bitIndexReg := q8StartBit
         }
@@ -446,6 +444,7 @@ class BitQuantNormalizedLane(p: BitQuantLaneParameter) extends Component {
     } otherwise {
       qMagReg := qNext.resized
       thresholdReg := thresholdNext
+      stepReg := (stepReg |>> 1).resize(q8ProductWidth)
       bitIndexReg := bitIndexReg - 1
     }
   }
