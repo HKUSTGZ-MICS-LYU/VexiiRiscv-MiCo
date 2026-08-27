@@ -37,6 +37,11 @@ class MiCoSocParam {
   var BitNetCfuQ8ComparePipe = false
   var BitNetCfuQuantStandard = false
   var BitNetCfuRfSync = true
+  var BitNetCfuBurstLoad = false
+  var useBitNetCfuV2 = false
+  var BitNetCfuV2DotPipeStages = 1
+  var BitNetCfuV2QuantPipeStages = 1
+  var BitNetCfuV2LoadBufferDepth = 0
   var withL2Cache = false
   var l2Ways = 8
   var l2Bytes = 4096
@@ -71,6 +76,7 @@ class MiCoSocParam {
     opt[Unit]("mico-vpu-stress") action { (v, c) => MiCoVpuStress = true }
     opt[Unit]("mico-vpu-pipe") action { (v, c) => MiCoVpuPipe = true }
     opt[Unit]("mico-bitnet-cfu") action { (v, c) => useBitNetCfu = true; vexii.withCfu = true }
+    opt[Unit]("mico-bitnet-cfu-v2") action { (v, c) => useBitNetCfuV2 = true; vexii.withCfu = true }
     opt[Int]("bitnet-cfu-len") action { (v, c) => BitNetCfuLen = v }
     opt[Int]("bitnet-cfu-width") action { (v, c) => BitNetCfuWidth = v }
     opt[Int]("bitnet-cfu-bus-width") action { (v, c) => BitNetCfuBusWidth = v }
@@ -88,6 +94,10 @@ class MiCoSocParam {
     opt[Unit]("bitnet-cfu-quant-standard") action { (v, c) => BitNetCfuQuantStandard = true }
     opt[Unit]("bitnet-cfu-rf-sync") action { (v, c) => BitNetCfuRfSync = true }
     opt[Unit]("bitnet-cfu-rf-async") action { (v, c) => BitNetCfuRfSync = false }
+    opt[Unit]("bitnet-cfu-burst-load") action { (v, c) => BitNetCfuBurstLoad = true }
+    opt[Int]("bitnet-cfu-v2-dot-pipe-stages") action { (v, c) => BitNetCfuV2DotPipeStages = v }
+    opt[Int]("bitnet-cfu-v2-quant-pipe-stages") action { (v, c) => BitNetCfuV2QuantPipeStages = v }
+    opt[Int]("bitnet-cfu-v2-load-buffer-depth") action { (v, c) => BitNetCfuV2LoadBufferDepth = v }
     opt[Unit]("l2-cache") action { (v, c) => withL2Cache = true; vexii.lsuL1Coherency = true}
     opt[Unit]("with-hub") action { (v, c) => withHub = true; vexii.lsuL1Coherency = true}
     opt[Unit]("with-dma") action { (v, c) => withDma = true }
@@ -123,7 +133,14 @@ class MiCoSocParam {
       vexii.lsuMemDataWidthMin = vexii.lsuMemDataWidthMin max MiCoVpuBusWidth
     }
     if(useBitNetCfu){
-      require(!useMiCoVpu, "MiCo VPU and BitNet CFU currently share the single CPU CFU bus; enable only one of them")
+      require(!useMiCoVpu && !useBitNetCfuV2, "MiCo VPU, BitNet CFU and BitNet CFU V2 share the single CPU CFU bus; enable only one of them")
+      vexii.lsuMemDataWidthMin = vexii.lsuMemDataWidthMin max BitNetCfuBusWidth
+    }
+    if(useBitNetCfuV2){
+      require(!useMiCoVpu && !useBitNetCfu, "MiCo VPU, BitNet CFU and BitNet CFU V2 share the single CPU CFU bus; enable only one of them")
+      require(BitNetCfuV2DotPipeStages >= 0, "bitnet-cfu-v2-dot-pipe-stages must be non-negative")
+      require(BitNetCfuV2QuantPipeStages >= 0, "bitnet-cfu-v2-quant-pipe-stages must be non-negative")
+      require(BitNetCfuV2LoadBufferDepth >= 0, "bitnet-cfu-v2-load-buffer-depth must be non-negative")
       vexii.lsuMemDataWidthMin = vexii.lsuMemDataWidthMin max BitNetCfuBusWidth
     }
   }

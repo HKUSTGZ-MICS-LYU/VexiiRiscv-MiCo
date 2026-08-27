@@ -11,24 +11,27 @@ import spinal.lib.bus.tilelink.fabric._
 import vexiiriscv.execute.cfu._
 
 object TilelinkBitNetCfuFiber {
-  def getM2sParameters(name: Nameable, width: Int = 32, pendingSize: Int = 4) = tilelink.M2sParameters(
-    addressWidth = 32,
-    dataWidth = width,
-    masters = List(
-      tilelink.M2sAgent(
-        name = name,
-        mapping = List(
-          tilelink.M2sSource(
-            id = SizeMapping(0, pendingSize),
-            emits = M2sTransfers(
-              get = tilelink.SizeRange(1, width / 8),
-              putFull = tilelink.SizeRange(1, width / 8)
+  def getM2sParameters(name: Nameable, width: Int = 32, pendingSize: Int = 4, maxGetBytes: Int = 0) = {
+    val getBytes = if(maxGetBytes == 0) width / 8 else maxGetBytes
+    tilelink.M2sParameters(
+      addressWidth = 32,
+      dataWidth = width,
+      masters = List(
+        tilelink.M2sAgent(
+          name = name,
+          mapping = List(
+            tilelink.M2sSource(
+              id = SizeMapping(0, pendingSize),
+              emits = M2sTransfers(
+                get = tilelink.SizeRange(1, getBytes),
+                putFull = tilelink.SizeRange(1, width / 8)
+              )
             )
           )
         )
       )
     )
-  )
+  }
 
   def getCfuBusParameters(xlen: Int = 32) = CfuBusParameter(
     CFU_VERSION = 0,
@@ -59,7 +62,8 @@ class TilelinkBitNetCfuFiber(bitNetParam: BitNetCfuParameter, xlen: Int) extends
     bus.m2s forceParameters getM2sParameters(
       TilelinkBitNetCfuFiber.this,
       bitNetParam.xlen,
-      bitNetParam.pendingSize
+      bitNetParam.pendingSize,
+      bitNetParam.maxLoadBytes
     )
     bus.s2m.supported load tilelink.S2mSupport.none()
 

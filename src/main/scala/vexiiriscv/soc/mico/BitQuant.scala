@@ -142,7 +142,13 @@ class BitQuantAbsmaxParts extends Bundle {
   val significand = UInt(BitQuantCompute.significandWidth bits)
 }
 
-class BitQuantNormalizedLane(p: BitQuantLaneParameter) extends Component {
+/**
+  * Reference implementation for the normalized threshold quantizer.
+  *
+  * Keep this implementation intact while optimizing the lane below.  It is
+  * also useful as a bit-exact RTL oracle for focused simulations.
+  */
+class BitQuantNormalizedLaneLegacy(p: BitQuantLaneParameter) extends Component {
   import BitQuantCompute._
 
   val io = new BitQuantLaneIO(p)
@@ -278,6 +284,169 @@ class BitQuantNormalizedLane(p: BitQuantLaneParameter) extends Component {
       resultReg := q8Code
     } otherwise {
       cursorReg := (cursorReg |>> 1).resize(p.maxQuantBits)
+    }
+  }
+
+  io.busy := busyReg
+  io.done := doneReg
+  io.result := resultReg
+}
+
+/**
+  * Normalized threshold quantizer with an incremental threshold datapath.
+  *
+  * The legacy lane rebuilds `(2 * level - 1) * Ma` on every iteration.  This
+  * lane keeps the current threshold directly and updates it with the current
+  * binary-search step.  Q2T remains a direct one-cycle path, while Q8 uses
+  * the same SAR decision sequence as the legacy lane.
+  */
+class BitQuantNormalizedLane(p: BitQuantLaneParameter) extends Component {
+  import BitQuantCompute._
+
+  val io = new BitQuantLaneIO(p)
+
+  val busyReg = RegInit(False)
+  val doneReg = RegInit(False)
+  val resultReg = Reg(Bits(p.maxQuantBits bits)) init(0)
+
+  // These registers are only meaningful while busyReg is asserted.  Leaving
+  // them non-reset avoids placing the wide quant datapath on the reset tree.
+  val signReg = Reg(Bool())
+  val alignedMagnitudeReg = Reg(UInt(q8ProductWidth bits))
+  val thresholdReg = Reg(UInt(q8ProductWidth bits))
+  val absSignificandReg = Reg(UInt(significandWidth bits))
+  val qMagReg = Reg(UInt((p.maxQuantBits - 1) max 1 bits))
+  val bitIndexReg = Reg(UInt(log2Up(p.maxQuantBits) max 1 bits))
+
+  val valueMagnitude = io.value(30 downto 0).asUInt
+  val absValid = io.absParts.valid
+  val valueNonZero = valueMagnitude =/= 0
+  val valueParts = fp32MagnitudeParts(valueMagnitude)
+  val valueSign = io.value(31)
+  val expDiff = (io.absParts.effectiveExponent.resize(9) - valueParts.effectiveExponent.resize(9)).resize(9)
+  val expDiffValid = io.absParts.effectiveExponent >= valueParts.effectiveExponent
+  val expDiffLarge = expDiff >= U(9, 9 bits)
+
+  // The iterative path only accepts differences in [0, 8].  Saturating the
+  // shift selector here also keeps invalid/out-of-range values harmless when
+  // the lane is idle.
+  val expShift = UInt(4 bits)
+  expShift := 0
+  when(expDiffValid) {
+    when(expDiff >= U(8, 9 bits)) {
+      expShift := U(8, 4 bits)
+    } otherwise {
+      expShift := expDiff.resize(4)
+    }
+  }
+
+  // Keep the single 24-bit mantissa comparator shared by Q2T and Q8.
+  val mantissaGteAbsmax = valueParts.significand >= io.absParts.significand
+
+  // Q2T uses the original normalized exponent/mantissa comparison.  It does
+  // not touch any of the wide Q8 registers.
+  val q2tKeep =
+    absValid && valueNonZero &&
+      (valueParts.effectiveExponent.resize(9) + U(1, 9 bits) > io.absParts.effectiveExponent.resize(9) ||
+        (valueParts.effectiveExponent.resize(9) + U(1, 9 bits) === io.absParts.effectiveExponent.resize(9) &&
+          mantissaGteAbsmax))
+  val q2tLevel = U(1, p.maxQuantBits bits)
+  val q2tResult = valueSign.mux(
+    (U(0, p.maxQuantBits bits) - q2tLevel).asBits,
+    q2tLevel.asBits
+  )
+
+  val modeQ8 = io.qBits > U(2, p.qBitsWidth bits)
+  val q8MaxLevel = U((1 << (p.maxQuantBits - 1)) - 1, p.maxQuantBits bits)
+  val q8SaturatedResult = valueSign.mux(
+    (U(0, p.maxQuantBits bits) - q8MaxLevel).asBits,
+    q8MaxLevel.asBits
+  )
+
+  // |X| >= |A| can be decided before entering the SAR loop.  The mantissa
+  // compare is shared by Q2T and this Q8 saturation check at the signal level.
+  val sameExponentMagnitudeGte =
+    valueParts.effectiveExponent === io.absParts.effectiveExponent &&
+      mantissaGteAbsmax
+  val valueGteAbsmax = !expDiffValid || sameExponentMagnitudeGte
+  val q8DirectZero = !absValid || !valueNonZero || (expDiffValid && expDiffLarge)
+  val q8DirectSaturate = modeQ8 && !q8DirectZero && valueGteAbsmax
+
+  val maxStartBit = 6 min (p.maxQuantBits - 1)
+  val q8StartBit = UInt(log2Up(p.maxQuantBits) max 1 bits)
+  q8StartBit := U(maxStartBit, q8StartBit.getWidth bits)
+  when(expDiffValid && expDiff > U(2, 9 bits) && expDiff < U(9, 9 bits)) {
+    q8StartBit := (U(8, 9 bits) - expDiff).resize(q8StartBit.getWidth)
+  }
+
+  val q8Scale = q8Scale254(valueParts.significand)
+  val alignedMagnitude = shiftRight0To8(q8Scale, expShift)
+  val initialThresholdShift = (q8StartBit.resize(4) + U(1, 4 bits)).resize(4)
+  val initialThresholdWide = shiftLeft0To8(io.absParts.significand, initialThresholdShift)
+  val initialThreshold = (initialThresholdWide - io.absParts.significand.resize(q8CompareWidth)).resize(q8ProductWidth)
+
+  // One SAR iteration: compare the pre-aligned magnitude, then update the
+  // threshold by the current binary-search step.  qMag is shifted every
+  // cycle; this is the compact bit sequence that becomes the final level.
+  val step = (absSignificandReg.resize(q8ProductWidth) |<< bitIndexReg).resize(q8ProductWidth)
+  val keep = alignedMagnitudeReg >= thresholdReg
+  val qNext = UInt(p.maxQuantBits bits)
+  qNext := (qMagReg.resize(p.maxQuantBits) |<< 1).resize(p.maxQuantBits)
+  qNext(0) := keep
+
+  val thresholdNext = UInt(q8ProductWidth bits)
+  thresholdNext := thresholdReg
+  when(keep) {
+    thresholdNext := (thresholdReg + step).resize(q8ProductWidth)
+  } otherwise {
+    thresholdNext := (thresholdReg - step).resize(q8ProductWidth)
+  }
+
+  val q8Code = Bits(p.maxQuantBits bits)
+  q8Code := valueSign.mux(
+    (U(0, p.maxQuantBits bits) - qNext).asBits,
+    qNext.asBits
+  )
+
+  when(io.start && !busyReg) {
+    // The done signal is intentionally level-style, matching the existing
+    // normalized wrapper contract.  An active Q8 operation clears it until
+    // the final SAR bit commits.
+    doneReg := True
+    busyReg := False
+    resultReg := 0
+
+    when(!modeQ8) {
+      when(q2tKeep) {
+        resultReg := q2tResult
+      }
+    } otherwise {
+      when(q8DirectSaturate) {
+        resultReg := q8SaturatedResult
+      } otherwise {
+        when(!q8DirectZero) {
+          doneReg := False
+          busyReg := True
+          signReg := valueSign
+          alignedMagnitudeReg := alignedMagnitude
+          thresholdReg := initialThreshold
+          absSignificandReg := io.absParts.significand
+          qMagReg := 0
+          bitIndexReg := q8StartBit
+        }
+      }
+    }
+  }
+
+  when(busyReg) {
+    when(bitIndexReg === 0) {
+      busyReg := False
+      doneReg := True
+      resultReg := q8Code
+    } otherwise {
+      qMagReg := qNext.resized
+      thresholdReg := thresholdNext
+      bitIndexReg := bitIndexReg - 1
     }
   }
 

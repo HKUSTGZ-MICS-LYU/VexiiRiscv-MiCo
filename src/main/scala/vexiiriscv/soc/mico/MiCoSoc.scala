@@ -73,6 +73,26 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
       rfSync = p.BitNetCfuRfSync,
       computePipe = p.BitNetCfuPipe,
       q8ComparePipe = p.BitNetCfuQ8ComparePipe,
+      quantStandard = p.BitNetCfuQuantStandard,
+      burstLoad = p.BitNetCfuBurstLoad)
+
+    val bitNetCfuV2Param = BitNetCfuV2Parameter(
+      vlen = p.BitNetCfuLen,
+      maclen = p.BitNetCfuWidth,
+      xlen = p.BitNetCfuBusWidth,
+      cfuInputWidth = p.vexii.xlen,
+      regDepth = p.BitNetCfuRegDepth,
+      qType = p.BitNetCfuQType,
+      withQ2 = p.BitNetCfuWithQ2,
+      withQ2T = p.BitNetCfuWithQ2T,
+      withQ8 = p.BitNetCfuWithQ8,
+      quantWidth = p.BitNetCfuQuantWidth,
+      dotPipeStages = p.BitNetCfuV2DotPipeStages,
+      quantPipeStages = p.BitNetCfuV2QuantPipeStages,
+      loadBufferDepth = p.BitNetCfuV2LoadBufferDepth,
+      rfRam = true,
+      rfSync = p.BitNetCfuRfSync,
+      burstLoad = p.BitNetCfuBurstLoad,
       quantStandard = p.BitNetCfuQuantStandard)
 
     val cfu = p.useMiCoVpu generate new TilelinkVpuCfuFiber(vpuParam, p.vexii.xlen) {
@@ -85,10 +105,16 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
       bus.setDownConnection(a = StreamPipe.S2M)
     }
 
+    val bitNetCfuV2 = p.useBitNetCfuV2 generate new TilelinkBitNetCfuV2Fiber(bitNetCfuV2Param, p.vexii.xlen) {
+      mainBus << bus
+      bus.setDownConnection(a = StreamPipe.S2M)
+    }
+
     val cfuConnect = p.vexii.withCfu generate (Fiber patch new Area {
       val cpuCfuBus = cpu.logic.core.host[CfuPlugin].logic.bus
       if(p.useMiCoVpu) cfu.logic.cfuBus << cpuCfuBus
       if(p.useBitNetCfu) bitNetCfu.logic.cfuBus << cpuCfuBus
+      if(p.useBitNetCfuV2) bitNetCfuV2.logic.cfuBus << cpuCfuBus
     })
 
     var memBus: Node = null
