@@ -323,8 +323,31 @@ class BitQuantNormalizedLane(p: BitQuantLaneParameter) extends Component {
   val valueNonZero = valueMagnitude =/= 0
   val valueParts = fp32MagnitudeParts(valueMagnitude)
   val valueSign = io.value(31)
-  val expDiff = (io.absParts.effectiveExponent.resize(9) - valueParts.effectiveExponent.resize(9)).resize(9)
-  val expDiffValid = io.absParts.effectiveExponent >= valueParts.effectiveExponent
+
+  val modeQ8 = io.qBits > U(2, p.qBitsWidth bits)
+  // Keep the Q8-only arithmetic quiet while the shared lane is idle or is
+  // serving a Q2T request.  Q8 starts need the path enabled immediately for
+  // the direct-zero/direct-saturate decisions.
+  val q8Active = modeQ8 && (busyReg || io.start)
+  val q8ValueSignificand = q8Active.mux(
+    valueParts.significand,
+    U(0, valueParts.significand.getWidth bits)
+  )
+  val q8ValueExponent = q8Active.mux(
+    valueParts.effectiveExponent,
+    U(0, valueParts.effectiveExponent.getWidth bits)
+  )
+  val q8AbsSignificand = q8Active.mux(
+    io.absParts.significand,
+    U(0, io.absParts.significand.getWidth bits)
+  )
+  val q8AbsExponent = q8Active.mux(
+    io.absParts.effectiveExponent,
+    U(0, io.absParts.effectiveExponent.getWidth bits)
+  )
+
+  val expDiff = (q8AbsExponent.resize(9) - q8ValueExponent.resize(9)).resize(9)
+  val expDiffValid = q8AbsExponent >= q8ValueExponent
   val expDiffLarge = expDiff >= U(9, 9 bits)
 
   // The iterative path only accepts differences in [0, 8].  Saturating the
@@ -356,7 +379,6 @@ class BitQuantNormalizedLane(p: BitQuantLaneParameter) extends Component {
     q2tLevel.asBits
   )
 
-  val modeQ8 = io.qBits > U(2, p.qBitsWidth bits)
   val q8MaxLevel = U((1 << (p.maxQuantBits - 1)) - 1, p.maxQuantBits bits)
   val q8SaturatedResult = valueSign.mux(
     (U(0, p.maxQuantBits bits) - q8MaxLevel).asBits,
@@ -366,11 +388,11 @@ class BitQuantNormalizedLane(p: BitQuantLaneParameter) extends Component {
   // |X| >= |A| can be decided before entering the SAR loop.  The mantissa
   // compare is shared by Q2T and this Q8 saturation check at the signal level.
   val sameExponentMagnitudeGte =
-    valueParts.effectiveExponent === io.absParts.effectiveExponent &&
-      mantissaGteAbsmax
+    q8ValueExponent === q8AbsExponent &&
+      q8ValueSignificand >= q8AbsSignificand
   val valueGteAbsmax = !expDiffValid || sameExponentMagnitudeGte
-  val q8DirectZero = !absValid || !valueNonZero || (expDiffValid && expDiffLarge)
-  val q8DirectSaturate = modeQ8 && !q8DirectZero && valueGteAbsmax
+  val q8DirectZero = q8Active && (!absValid || !valueNonZero || (expDiffValid && expDiffLarge))
+  val q8DirectSaturate = q8Active && !q8DirectZero && valueGteAbsmax
 
   val maxStartBit = 6 min (p.maxQuantBits - 1)
   val q8StartBit = UInt(log2Up(p.maxQuantBits) max 1 bits)
@@ -379,11 +401,11 @@ class BitQuantNormalizedLane(p: BitQuantLaneParameter) extends Component {
     q8StartBit := (U(8, 9 bits) - expDiff).resize(q8StartBit.getWidth)
   }
 
-  val q8Scale = q8Scale254(valueParts.significand)
+  val q8Scale = q8Scale254(q8ValueSignificand)
   val alignedMagnitude = shiftRight0To8(q8Scale, expShift)
   val initialThresholdShift = (q8StartBit.resize(4) + U(1, 4 bits)).resize(4)
-  val initialThresholdWide = shiftLeft0To8(io.absParts.significand, initialThresholdShift)
-  val initialThreshold = (initialThresholdWide - io.absParts.significand.resize(q8CompareWidth)).resize(q8ProductWidth)
+  val initialThresholdWide = shiftLeft0To8(q8AbsSignificand, initialThresholdShift)
+  val initialThreshold = (initialThresholdWide - q8AbsSignificand.resize(q8CompareWidth)).resize(q8ProductWidth)
 
   // One SAR iteration: compare the pre-aligned magnitude, then update the
   // threshold by the current binary-search step.  stepReg is shifted by one
@@ -401,7 +423,7 @@ class BitQuantNormalizedLane(p: BitQuantLaneParameter) extends Component {
   val thresholdNext = thresholdAddSub.resize(q8ProductWidth)
 
   val q8Code = Bits(p.maxQuantBits bits)
-  q8Code := valueSign.mux(
+  q8Code := q8Active.mux(valueSign, False).mux(
     (U(0, p.maxQuantBits bits) - qNext).asBits,
     qNext.asBits
   )
@@ -428,7 +450,7 @@ class BitQuantNormalizedLane(p: BitQuantLaneParameter) extends Component {
           signReg := valueSign
           alignedMagnitudeReg := alignedMagnitude
           thresholdReg := initialThreshold
-          stepReg := (io.absParts.significand.resize(q8ProductWidth) |<< q8StartBit).resize(q8ProductWidth)
+          stepReg := (q8AbsSignificand.resize(q8ProductWidth) |<< q8StartBit).resize(q8ProductWidth)
           qMagReg := 0
           bitIndexReg := q8StartBit
         }

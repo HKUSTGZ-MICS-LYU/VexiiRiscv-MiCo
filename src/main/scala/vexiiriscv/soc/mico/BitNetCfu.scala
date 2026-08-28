@@ -336,8 +336,14 @@ class BitNetCfu(cfuParam: CfuBusParameter,
       val nextWeightChunk = (rfRead.weightChunkIndex + U(1, weightChunkIndexWidth bits)).resize(weightChunkIndexWidth)
       val opwQ1 = weightChunks(rfRead.weightChunkIndex).resize(weightSliceBitsMax)
       val opwWide = (weightChunks(nextWeightChunk) ## weightChunks(rfRead.weightChunkIndex)).resize(weightSliceBitsMax)
-      OPA := int8Chunks(chunkIndex)
-      OPW := (config.qType === U(Q1B, 2 bits)).mux(opwQ1, opwWide)
+      // Keep wide dot operands quiet when this pipeline slot is invalid.
+      // SEL/DONE retain their original timing and the active-cycle operands
+      // remain unchanged.
+      OPA := sel.mux(int8Chunks(chunkIndex), B(0, maclen bits))
+      OPW := sel.mux(
+        (config.qType === U(Q1B, 2 bits)).mux(opwQ1, opwWide),
+        B(0, weightSliceBitsMax bits)
+      )
       QTYPE := config.qType
       SEL := sel
       DONE := doneNow
@@ -602,7 +608,6 @@ class BitNetCfu(cfuParam: CfuBusParameter,
 
     if(p.withQ2T) {
       Q2TP.whenIsActive {
-        if(p.rfSync) vecReadSyncCmd(q2tRead.RS2, 0)
         quant.selQ2T := (if(p.computePipe) !quant.done else True)
         when(quant.done) {
           io.bus.rsp.valid := True
@@ -614,7 +619,6 @@ class BitNetCfu(cfuParam: CfuBusParameter,
 
     if(p.withQ8) {
       Q8P.whenIsActive {
-        if(p.rfSync) vecReadSyncCmd(q8Read.RS2, 0)
         quant.selQ8 := !quant.done
         when(quant.done) {
           io.bus.rsp.valid := True
@@ -625,10 +629,6 @@ class BitNetCfu(cfuParam: CfuBusParameter,
     }
 
     BDOTP.whenIsActive {
-      if(p.rfSync) {
-        vecReadSyncCmd(rfRead.RS1, 0)
-        vecReadSyncCmd(rfRead.RS2, 1)
-      }
       compute.sel := (if(p.computePipe) !compute.done else True)
       when(compute.done) {
         io.bus.rsp.valid := True

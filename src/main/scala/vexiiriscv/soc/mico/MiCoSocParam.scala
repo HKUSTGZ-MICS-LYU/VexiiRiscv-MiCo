@@ -29,7 +29,7 @@ class MiCoSocParam {
   var BitNetCfuRegDepth = 2
   var BitNetCfuQType = "1.5b"
   var BitNetCfuWithQ2 = false
-  var BitNetCfuWithQ2T = true
+  var BitNetCfuWithQ2T = false
   var BitNetCfuWithQ8 = false
   var BitNetCfuQuantWidth = 0
   var BitNetCfuStress = false
