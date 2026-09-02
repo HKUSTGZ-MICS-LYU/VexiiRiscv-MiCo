@@ -16,7 +16,7 @@ ASIC mode now covers the Fetch L1 data banks and synchronous tag/PLRU memories, 
 
 The supplied ASAP7 SRAM cells have one address pin and one synchronous operation per cycle. The Ram_1w_1rs wrapper therefore requires the Spinal instance to use the same clock and a one-cycle read; it does not claim independent dual-clock or simultaneous independent read/write behavior. The wrapper rejects clock-crossing and other read-latency parameters at elaboration time.
 
-SRAM mapping is classified by write granularity. A byte-enable memory is composed from logical 8-bit lanes; a whole-word memory selects the smallest carrier whose width is at least the full logical word; and a multi-segment mask (such as the 102-bit, two-chunk BTB entry) selects a carrier for each masked segment. The complete physical-view manifest has only 64-bit carriers, so the normal GDS flow uses x64 for full-word/segment units and consumes low bits when the logical unit is narrower. The abstract-only manifest includes all 36 SRAM variants with Liberty, LEF, and Verilog views; it selects x16 for byte lanes, x32 for 22/32-bit whole-word units, and x64 for a 51/52-bit unit. APR loads only the macro variants actually selected from the generated Spinal RAM parameters. MiCoSoc `RamFiber` uses 32-bit words, so `--ram-kbytes N` maps to `N * 1024 / 4` logical words.
+SRAM mapping is classified by write granularity. ASAP7 byte-enable memories are composed from logical 8-bit lanes. ICS55 macros expose bit-granular `WEB`, so a byte-enable memory prefers one carrier covering the complete logical word and falls back to logical 8-bit lanes when no suitable bit-write macro is available. A whole-word memory selects the smallest carrier whose width is at least the full logical word; and a multi-segment mask (such as the 102-bit, two-chunk BTB entry) selects a carrier for each masked segment. The complete physical-view manifest has only 64-bit carriers, so the normal GDS flow uses x64 for full-word/segment units and consumes low bits when the logical unit is narrower. The abstract-only manifest includes all 36 SRAM variants with Liberty, LEF, and Verilog views; it selects x16 for byte lanes, x32 for 22/32-bit whole-word units, and x64 for a 51/52-bit unit. APR loads only the macro variants actually selected from the generated Spinal RAM parameters. MiCoSoc `RamFiber` uses 32-bit words, so `--ram-kbytes N` maps to `N * 1024 / 4` logical words.
 
 Run the checked-in view validation without SiliconCompiler:
 
@@ -103,9 +103,43 @@ conda run -n silicon python asic/flow/mico_flow.py \
 
 Outputs are under `asic/build/<preset>/<run-name>/`, including `metrics.json`, `metrics.summary.txt`, prepared GDS aliases, and the SiliconCompiler build directory. Add `--scope cpu-cfu` when comparing the CPU+CFU hierarchy; the physical top remains `MiCoSoc` so bus and memory context stay real. The ASIC flow omits SiliconCompiler 0.38.5's pre-floorplan `cleanup.clean` node because that node reports an invalid `utilization=-100` metric before floorplanning; synthesis output is passed directly to OpenROAD floorplan.
 
-The macro-placement hook places generated SRAM banks as fixed OpenDB instances on the ASAP7 M3 track grid, then OpenROAD places the standard-cell logic around them. This is required because the supplied SRAM pin phase is incompatible with the snapped standard-cell site phase for `rtl_macro_placer`; it does not alter the SRAM LEF or GDS geometry. ASAP7 standard-cell Liberty uses `1ps`, so `--clock-period 2000.0` denotes a 2ns/500MHz target; the SDC uncertainty and UART delays are also expressed in ps. For a bounded physical smoke, add `--fast-placement`; it skips the optional timing-repair nodes but still runs placement, CTS, routing, and GDS export. For experiments with the smaller abstract SRAM variants, add `--abstract-only`; this selects all 36 abstract macros, prefers `x16` carriers for byte lanes, and forces SiliconCompiler to stop at `route.global`, producing route/timing reports without GDS preparation or stream-out. Add `--abstract-detailed-route` only when the machine has enough memory for detailed routing.
+Macro placement follows SiliconCompiler's native OpenROAD task. Because the flow does not set `mpl_constraints`, SC's `sc_macro_placement.tcl` invokes OpenROAD `rtl_macro_placer`, using the generated netlist, macro dimensions, core boundary, halo, and connectivity instead of a fixed instance-order packing script. No ICS55 grid legalization is applied yet; the checked-in `macro_placement_ics55.tcl` remains available for a later legalization pass if the native placer produces invalid core7 coordinates or poor pin access. ASAP7 standard-cell Liberty uses `1ps`, so `--clock-period 2000.0` denotes a 2ns/500MHz target; the SDC uncertainty and UART delays are also expressed in ps. For a bounded physical smoke, add `--fast-placement`; it skips the optional timing-repair nodes but still runs placement, CTS, routing, and GDS export. For experiments with the smaller abstract SRAM variants, add `--abstract-only`; this selects all 36 abstract macros, prefers `x16` carriers for byte lanes, and forces SiliconCompiler to stop at `route.global`, producing route/timing reports without GDS preparation or stream-out. Add `--abstract-detailed-route` only when the machine has enough memory for detailed routing.
 
 For a memory-bounded APR smoke, `--no-btb` omits only the BTB while retaining the real MiCoSoc/cache hierarchy and hard SRAM macros. ASIC SRAM-enabled runs use the single-port SRAM-compatible mode by default; `bootMemClear` must remain disabled for BTB blackboxing. `--grt-use-pin-access` enables OpenROAD pin-access preparation; `--grt-overflow-iter N` bounds global-route cleanup, and `--drt-end-iteration N` bounds detailed-route optimization. `--fast-placement` selects `--drt-end-iteration 1` unless overridden. `--grt-allow-congestion` is diagnostic-only and must not be treated as signoff. The flow adds the RVT ASAP7 library to stream export so RVT, LVT, SLVT, and SRAM cells all have physical views. The checked physical smoke produced a KLayout GDS export and an antenna report; the available ASAP7 package does not provide a foundry KLayout DRC deck, and the bounded detailed-route probe retained DRT geometry violations, so those artifacts are routing/export evidence rather than clean signoff. Abstract-only results are routing/timing experiments only: their macro LEFs are not backed by GDS in this checkout and must not be treated as final layout.
+
+## ICS55 Flow
+
+The flow also supports the checked-in ICsprout55 collateral through `--pdk ics55`. The default root is `asic/pdk/icsprout55-pdk`; override it with `--ics55-pdk-root` or `ICSPROUT55_PDK_ROOT`. H7CR/RVT is the main library, with H7CL/LVT and H7CH/HVT available for optimization. The adapter uses the ecosystem LEFs (`*_ecos.lef`), M2 GDS views, `core7` rows, MET2-MET5 routing, and the local H7C support-cell lists.
+
+ICS55 Liberty uses nanoseconds. Therefore `--clock-period 2.0` means a 2ns target, and the generated `micosoc.sdc` uses 0.05ns uncertainty and 0.2ns UART delays:
+
+```bash
+conda run -n silicon python asic/flow/mico_flow.py \
+  --pdk ics55 --preset minimal --step syn --sram-backend ics55 \
+  --clock-period 2.0 --run-name minimal-ics55-syn
+
+conda run -n silicon python asic/flow/mico_flow.py \
+  --pdk ics55 --preset minimal --step asic --sram-backend ics55 \
+  --clock-period 2.0 --fast-placement --run-name minimal-ics55-global
+```
+
+For the first ICS55 backend acceptance boundary, the ASIC flow stops at `route.global` by default. Use `--to-step route.global` explicitly when resuming or scripting a run. The flow removes `floorplan.power_grid` because this local checkout does not provide a verified ICsprout55 PDN recipe, and removes `cts.fillcell` because the available `FILLCAP*` cells do not form a valid arbitrary-width filler set. The generic tapcell node is retained only for row cutting and reports a missing tapcell configuration. RC values used for OpenROAD estimation are provisional and are not extraction/signoff data.
+
+When `--sram-backend ics55` is selected without `--ics55-sram-manifest`, the flow first generates the Spinal RTL, scans every `Ram_1wrs`/`Ram_1w_1rs` instance, and calls `asic/pdk/download_ics55_sram_pdk.py` for the required carrier widths and depths. Requests with the same carrier width are coalesced to one sufficiently deep package; memories deeper than the downloader maximum are banked by the generated wrapper. For ICS55 byte-mask RAMs, the flow prefers one bit-write macro covering the complete logical word (for example, one `256x32 mux8` for a 32-bit byte-masked RAM) and falls back to per-byte carriers when no such macro is available. The current minimal RTL therefore uses `256x8 mux8` and `256x32 mux8` packages rather than assuming one fixed SRAM. The flow reuses verified cache entries, validates the downloaded LEF/Liberty/Verilog views, and writes `ics55_sram_manifest.json` inside the run directory. Synthesis uses the downloaded macro blackboxes and Liberty timing views; APR uses their LEFs. `--ics55-sram-words` and `--ics55-sram-bits` act as optional minimum carrier requirements, while `--ics55-sram-mux` is a preference that can fall back when the requested width is incompatible. The VT, low-power, redundancy, word-write, bus-format, ring, and corner options are passed to every downloader request.
+
+For a manually prepared package, `--ics55-sram-manifest` remains available:
+
+```bash
+conda run -n silicon python asic/flow/mico_flow.py \
+  --pdk ics55 --preset minimal --step asic --sram-backend ics55 \
+  --ics55-sram-manifest /path/to/ics55_sram_manifest.json \
+  --clock-period 2.0 --fast-placement --to-step route.global \
+  --run-name minimal-ics55-sram-global
+```
+
+The manifest must identify each macro's Verilog, LEF, Liberty, and (for physical preparation) GDS view, dimensions, address/data ports, and GDS source cell. It may set `physical_views: false` for an abstract route experiment. Full `write.gds`/`write.views` is rejected until a verified KLayout technology/layer-map setup is added; no IO/padframe, PDN, DRC/LVS, or signoff RC flow is claimed by this integration.
+
+`--sram-backend ics55` is only valid with `--pdk ics55`, and `--sram-backend asap7` only with `--pdk asap7`. The existing ASAP7 commands and their picosecond timing units remain unchanged.
 
 ## Abstract-Only Route Check
 
@@ -139,7 +173,7 @@ conda run -n silicon python asic/flow/mico_flow.py \
 ## Tests
 
 ```bash
-python asic/tests/test_sram_flow.py
+python -m unittest discover -s asic/tests -q
 python -m py_compile asic/flow/*.py
 ```
 

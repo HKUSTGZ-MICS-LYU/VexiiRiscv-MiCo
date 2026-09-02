@@ -74,10 +74,14 @@ def _sram_options(manifest: dict, minimum_width: int = 8) -> list[dict]:
     return options
 
 
-def _macro_width_groups(manifest: dict, minimum_width: int = 8) -> list[tuple[int, list[dict]]]:
-    """Group all available depth variants by ascending physical width."""
+def _macro_width_groups(
+    manifest: dict, minimum_width: int = 8, bit_write_only: bool = False
+) -> list[tuple[int, list[dict]]]:
+    """Group available depth variants by ascending physical width."""
     groups = {}
     for macro in _eligible_macros(manifest, minimum_width):
+        if bit_write_only and macro.get("write_mask_granularity") != "bit":
+            continue
         groups.setdefault(macro["width"], []).append(macro)
     return [
         (width, sorted(macros, key=lambda macro: macro["depth"]))
@@ -103,13 +107,51 @@ def select_macro(
     )
 
 
+def select_packed_macro(
+    manifest: dict, word_width: int, word_count: int
+) -> dict | None:
+    """Select one bit-write macro that covers a complete logical word."""
+    candidates = [
+        macro for macro in manifest["macros"]
+        if macro.get("write_mask_granularity") == "bit"
+        and macro["width"] >= word_width
+    ]
+    if not candidates:
+        return None
+    max_depth = max(macro["depth"] for macro in candidates)
+    candidates = [
+        macro for macro in candidates
+        if macro["depth"] >= min(word_count, max_depth)
+    ]
+    return min(candidates, key=lambda macro: (
+        macro["width"], macro["depth"], macro["name"]
+    ))
+
+
 def _padded_data(macro_width: int, payload_width: str, data_name: str) -> str:
     if payload_width.isdigit():
-        return f"{{{macro_width - int(payload_width)}'d0, {data_name}}}"
+        padding = macro_width - int(payload_width)
+        if padding == 0:
+            return data_name
+        return f"{{{padding}'d0, {data_name}}}"
     return (
         "{{(" + str(macro_width) + " - (" + payload_width + ")){1'b0}}, "
         + data_name
         + "}"
+    )
+
+
+def _bit_write_bus(macro_width: int, payload_width: str, write_mask: str) -> str:
+    """Convert active-high per-bit enables into an active-low WEB bus."""
+    if payload_width.isdigit():
+        padding = macro_width - int(payload_width)
+        if padding == 0:
+            return f"~({write_mask})"
+        return f"{{{{{padding}{{1'b1}}}}, ~({write_mask})}}"
+    return (
+        "{{(" + str(macro_width) + " - (" + payload_width + ")){1'b1}}, ~("
+        + write_mask
+        + ")}"
     )
 
 
@@ -123,9 +165,10 @@ def _emit_macro_chain(
     write_enable: str,
     prefix: str,
     rf: bool,
+    write_mask: str | None = None,
 ) -> None:
     """Emit width/depth generate branches for one stored unit."""
-    groups = _macro_width_groups(manifest)
+    groups = _macro_width_groups(manifest, bit_write_only=write_mask is not None)
     first = True
     for width, macros in groups:
         for depth_index, macro in enumerate(macros):
@@ -170,32 +213,67 @@ def _emit_macro_chain(
                     f"        assign {payload_rdata} = bank_data[rd_bank_index_q][{payload_width} - 1:0];",
                 ])
             for_signal = "bank_idx"
+            clock_signal = "wr_clk" if rf else "clk"
+            address_signal = (
+                f"wr_en ? wr_addr_ext[{macro['address_width'] - 1}:0] : rd_addr_ext[{macro['address_width'] - 1}:0]"
+                if rf else
+                f"addr_ext[{macro['address_width'] - 1}:0]"
+            )
+            banksel_signal = (
+                "(wr_en && (wr_bank_index == bank_idx)) || (rd_en && rd_dataEn && (rd_bank_index == bank_idx))"
+                if rf else
+                "en && (bank_index == bank_idx)"
+            )
+            read_signal = (
+                "rd_en && rd_dataEn && (rd_bank_index == bank_idx)"
+                if rf else
+                "en && !wr && (bank_index == bank_idx)"
+            )
+            write_signal = (
+                write_enable + " && (wr_bank_index == bank_idx)"
+                if rf else
+                write_enable + " && (bank_index == bank_idx)"
+            )
+            data_signal = _padded_data(macro["width"], payload_width, payload_data)
+            port_map = macro.get("port_map")
             body.extend([
                 f"        genvar {for_signal};",
                 f"        for ({for_signal} = 0; {for_signal} < BANK_COUNT; {for_signal} = {for_signal} + 1) begin : gen_bank",
                 f"          {macro['name']} u_sram (",
-                "            .clk(wr_clk)," if rf else "            .clk(clk),",
-                (
-                    f"            .ADDRESS(wr_en ? wr_addr_ext[{macro['address_width'] - 1}:0] : rd_addr_ext[{macro['address_width'] - 1}:0]),"
-                    if rf else
-                    f"            .ADDRESS(addr_ext[{macro['address_width'] - 1}:0]),"
-                ),
-                f"            .wd({_padded_data(macro['width'], payload_width, payload_data)}),",
-                (
-                    "            .banksel((wr_en && (wr_bank_index == bank_idx)) || (rd_en && rd_dataEn && (rd_bank_index == bank_idx))),"
-                    if rf else
-                    "            .banksel(en && (bank_index == bank_idx)),"
-                ),
-                "            .read(rd_en && rd_dataEn && (rd_bank_index == bank_idx))," if rf else "            .read(en && !wr && (bank_index == bank_idx)),",
-                (
-                    "            .write(" + write_enable + " && (wr_bank_index == bank_idx)),"
-                    if rf else
-                    "            .write(" + write_enable + " && (bank_index == bank_idx)),"
-                ),
-                "            .dataout(bank_data[bank_idx])",
-                "          );",
-                "        end",
             ])
+            if port_map:
+                write_bus = (
+                    _bit_write_bus(macro["width"], payload_width, write_mask)
+                    if write_mask is not None
+                    else f"{{{macro['width']}{{~({write_signal})}}}}"
+                )
+                body.extend([
+                    f"            .{port_map['clk']}({clock_signal}),",
+                    f"            .{port_map['address']}({address_signal}),",
+                    f"            .{port_map['data']}({data_signal}),",
+                    f"            .{port_map['banksel']}(~({banksel_signal})),",
+                    f"            .{port_map['read']}({read_signal}),",
+                    f"            .{port_map['write']}({write_bus}),",
+                    f"            .{port_map['dataout']}(bank_data[bank_idx]),",
+                ])
+                if port_map.get("margin"):
+                    body.append(f"            .{port_map['margin']}(4'b0),")
+                if port_map.get("margin_enable"):
+                    body.append(f"            .{port_map['margin_enable']}(1'b0),")
+                body[-1] = body[-1].rstrip(",")
+                body.append("          );")
+            else:
+                body.extend([
+                    f"            .clk({clock_signal}),",
+                    f"            .ADDRESS({address_signal}),",
+                    f"            .wd({data_signal}),",
+                    f"            .banksel({banksel_signal}),",
+                    f"            .read({read_signal}),",
+                    f"            .write({write_signal}),",
+                    "            .dataout(bank_data[bank_idx])",
+                    "          );",
+                ])
+            body.append("        end")
     body.extend([
         "      end else begin : gen_sram_unsupported_width",
         f"        assign {payload_rdata} = 'x;",
@@ -208,7 +286,12 @@ def generate_main(manifest: dict, word_width: int, word_count: int) -> tuple[str
     if word_width <= 0 or word_count <= 0:
         raise ValueError("word_width and word_count must be positive")
     options = _sram_options(manifest)
-    selected_macro = select_macro(manifest, 8, word_count, logical_width=8)
+    byte_mask_width = max(1, (word_width + 7) // 8)
+    packed_macro = (
+        select_packed_macro(manifest, word_width, word_count)
+        if byte_mask_width > 1 else None
+    )
+    selected_macro = packed_macro or select_macro(manifest, 8, word_count, logical_width=8)
     banks = math.ceil(word_count / selected_macro["depth"])
     body = [
         "module Ram_1wrs #(",
@@ -238,17 +321,57 @@ def generate_main(manifest: dict, word_width: int, word_count: int) -> tuple[str
         "  wire [wordWidth - 1:0] word_rdata;",
         "  wire [SEGMENT_WIDTH - 1:0] segment_rdata [0:maskWidth - 1];",
         "  generate",
-        "    if (BYTE_MASK_MODE) begin : gen_byte_mask",
-        "      genvar lane_idx;",
-        "      for (lane_idx = 0; lane_idx < LANE_COUNT; lane_idx = lane_idx + 1) begin : gen_lane",
-        "        wire [7:0] lane_wdata;",
-        "        wire [7:0] lane_rdata;",
-        "        if ((lane_idx + 1) * 8 <= wordWidth) begin : gen_full_write_lane",
-        "          assign lane_wdata = wrData[lane_idx * 8 +: 8];",
-        "        end else begin : gen_partial_write_lane",
-        "          assign lane_wdata = {{(8 - (wordWidth - lane_idx * 8)){1'b0}}, wrData[wordWidth - 1:lane_idx * 8]};",
-        "        end",
     ]
+    if packed_macro is not None:
+        body.extend([
+            "    if (BYTE_MASK_MODE) begin : gen_packed_byte_mask",
+            "      wire [wordWidth - 1:0] byte_write_mask;",
+            "      genvar packed_mask_idx;",
+            "      for (packed_mask_idx = 0; packed_mask_idx < LANE_COUNT; packed_mask_idx = packed_mask_idx + 1) begin : gen_packed_mask",
+            "        if ((packed_mask_idx + 1) * 8 <= wordWidth) begin : gen_full_mask_byte",
+            "          assign byte_write_mask[packed_mask_idx * 8 +: 8] = {8{en && wr && mask[packed_mask_idx]}};",
+            "        end else begin : gen_partial_mask_byte",
+            "          assign byte_write_mask[packed_mask_idx * 8 +: (wordWidth - packed_mask_idx * 8)] = {(wordWidth - packed_mask_idx * 8){en && wr && mask[packed_mask_idx]}};",
+            "        end",
+            "      end",
+        ])
+        _emit_macro_chain(
+            body,
+            manifest,
+            payload_width="wordWidth",
+            payload_data="wrData",
+            payload_rdata="word_rdata",
+            write_enable="en && wr",
+            prefix="packed_byte",
+            rf=False,
+            write_mask="byte_write_mask",
+        )
+        body.extend([
+            "      assign rdData = word_rdata;",
+            "    end else if (BYTE_MASK_MODE) begin : gen_byte_mask",
+            "      genvar lane_idx;",
+            "      for (lane_idx = 0; lane_idx < LANE_COUNT; lane_idx = lane_idx + 1) begin : gen_lane",
+            "        wire [7:0] lane_wdata;",
+            "        wire [7:0] lane_rdata;",
+            "        if ((lane_idx + 1) * 8 <= wordWidth) begin : gen_full_write_lane",
+            "          assign lane_wdata = wrData[lane_idx * 8 +: 8];",
+            "        end else begin : gen_partial_write_lane",
+            "          assign lane_wdata = {{(8 - (wordWidth - lane_idx * 8)){1'b0}}, wrData[wordWidth - 1:lane_idx * 8]};",
+            "        end",
+        ])
+    else:
+        body.extend([
+            "    if (BYTE_MASK_MODE) begin : gen_byte_mask",
+            "      genvar lane_idx;",
+            "      for (lane_idx = 0; lane_idx < LANE_COUNT; lane_idx = lane_idx + 1) begin : gen_lane",
+            "        wire [7:0] lane_wdata;",
+            "        wire [7:0] lane_rdata;",
+            "        if ((lane_idx + 1) * 8 <= wordWidth) begin : gen_full_write_lane",
+            "          assign lane_wdata = wrData[lane_idx * 8 +: 8];",
+            "        end else begin : gen_partial_write_lane",
+            "          assign lane_wdata = {{(8 - (wordWidth - lane_idx * 8)){1'b0}}, wrData[wordWidth - 1:lane_idx * 8]};",
+            "        end",
+        ])
     _emit_macro_chain(
         body,
         manifest,
@@ -320,6 +443,7 @@ def generate_main(manifest: dict, word_width: int, word_count: int) -> tuple[str
         "logical_lanes": (word_width + 7) // 8,
         "logical_width": word_width,
         "physical_width": selected_macro["width"],
+        "packing": "full_word" if packed_macro is not None else "byte_lane",
         "physical_macros": [macro["name"] for macro in options],
     }
 
@@ -463,16 +587,36 @@ def generate_blackbox_declarations(manifest: dict) -> str:
         "",
     ]
     for macro in manifest["macros"]:
+        port_map = macro.get("port_map")
+        if port_map:
+            ports = [
+                f"  input {port_map['clk']},",
+                f"  input [{macro['address_width']} - 1:0] {port_map['address']},",
+                f"  input [{macro['width']} - 1:0] {port_map['data']},",
+                f"  input {port_map['banksel']},",
+                f"  input {port_map['read']},",
+                f"  input [{macro['width']} - 1:0] {port_map['write']},",
+                f"  output [{macro['width']} - 1:0] {port_map['dataout']},",
+            ]
+            if port_map.get("margin"):
+                ports.append(f"  input [3:0] {port_map['margin']},")
+            if port_map.get("margin_enable"):
+                ports.append(f"  input {port_map['margin_enable']},")
+            ports[-1] = ports[-1].rstrip(",")
+        else:
+            ports = [
+                "  input clk,",
+                f"  input [{macro['address_width']} - 1:0] ADDRESS,",
+                f"  input [{macro['width']} - 1:0] wd,",
+                "  input banksel,",
+                "  input read,",
+                "  input write,",
+                f"  output [{macro['width']} - 1:0] dataout",
+            ]
         sections.extend([
             "(* blackbox *)",
             f"module {macro['name']} (",
-            "  input clk,",
-            f"  input [{macro['address_width']} - 1:0] ADDRESS,",
-            f"  input [{macro['width']} - 1:0] wd,",
-            "  input banksel,",
-            "  input read,",
-            "  input write,",
-            f"  output [{macro['width']} - 1:0] dataout",
+            *ports,
             ");",
             "endmodule",
             "",

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the checked-in ASAP7 SRAM views before SiliconCompiler runs."""
+"""Validate manifest-driven SRAM views before SiliconCompiler runs."""
 
 from __future__ import annotations
 
@@ -16,14 +16,17 @@ PORT_RE = re.compile(
     r"\b(input|output|inout)\s+(?:(?:wire|reg)\s+)?"
     r"(?:\[(\d+)\s*:\s*(\d+)\]\s+)?(\w+)"
 )
-MEM_RE = re.compile(r"\bmem\s*\[\s*(\d+)\s*:\s*(\d+)\s*\]")
+MEM_RE = re.compile(
+    r"\bmem(?:ory)?\s*\[\s*(\d+)\s*:\s*(\d+)\s*\]",
+    re.IGNORECASE,
+)
 LEF_MACRO_RE = re.compile(r"^MACRO\s+(\S+)", re.MULTILINE)
 LEF_SIZE_RE = re.compile(r"^\s*SIZE\s+([0-9.eE+-]+)\s+BY\s+([0-9.eE+-]+)", re.MULTILINE)
 LEF_SITE_RE = re.compile(r"^\s*SITE\s+(\S+)\s*;", re.MULTILINE)
 LEF_PIN_RE = re.compile(r"^\s*PIN\s+(\S+)", re.MULTILINE)
 LIB_CELL_RE = re.compile(r"\bcell\s*\(\s*([^\)]+)\s*\)")
 LIB_AREA_RE = re.compile(r"\barea\s*:\s*([0-9.eE+-]+)")
-GDS_NAME_RE = re.compile(rb"(?:srambank|dummy|FILLER_BLANK)_[A-Za-z0-9_]+")
+GDS_NAME_RE = re.compile(rb"[A-Za-z][A-Za-z0-9_]{2,}")
 
 REQUIRED_PORTS = {"clk", "ADDRESS", "wd", "banksel", "read", "write", "dataout"}
 
@@ -43,8 +46,9 @@ def parse_verilog(path: Path) -> dict:
     if not module:
         raise ValueError(f"{path}: no Verilog module declaration")
     header = text[module.end() : text.find(");", module.end())]
+    port_text = header if PORT_RE.search(header) else text[module.end() :]
     ports = {}
-    for match in PORT_RE.finditer(header):
+    for match in PORT_RE.finditer(port_text):
         direction, msb, lsb, name = match.groups()
         width = abs(int(msb) - int(lsb)) + 1 if msb is not None else 1
         ports[name] = {"direction": direction, "width": width}
@@ -61,12 +65,12 @@ def parse_lef(path: Path) -> dict:
     size = LEF_SIZE_RE.search(text)
     site = LEF_SITE_RE.search(text)
     pins = {match.group(1).split("[")[0] for match in LEF_PIN_RE.finditer(text)}
-    if not macro or not size or not site:
+    if not macro or not size:
         raise ValueError(f"{path}: missing LEF MACRO or SIZE")
     return {
         "macro": macro.group(1),
         "size": [float(size.group(1)), float(size.group(2))],
-        "site": site.group(1),
+        "site": site.group(1) if site else None,
         "pins": sorted(pins),
     }
 
@@ -78,8 +82,11 @@ def parse_lib(path: Path) -> dict:
     return {"cells": cells, "area": float(area.group(1)) if area else None}
 
 
-def gds_names(path: Path) -> set[str]:
-    return {name.decode("ascii") for name in GDS_NAME_RE.findall(path.read_bytes())}
+def gds_names(path: Path, expected: set[str] | None = None) -> set[str]:
+    data = path.read_bytes()
+    if expected is not None:
+        return {name for name in expected if name.encode("ascii") in data}
+    return {name.decode("ascii") for name in GDS_NAME_RE.findall(data)}
 
 
 def inspect_gds(path: Path, cell: str) -> tuple[float, float]:
@@ -101,9 +108,9 @@ def inspect_gds(path: Path, cell: str) -> tuple[float, float]:
 def normalize_liberty(source: Path, output: Path, address_width: int) -> None:
     text = source.read_text()
     address_type = re.search(
-        r"(type\s*\([^)]*address[^)]*\)\s*\{)(.*?)(\n\s*\})",
+        r"(type\s*\([^)]*(?:addr|address)[^)]*\)\s*\{)(.*?)(\n\s*\})",
         text,
-        re.DOTALL,
+        re.DOTALL | re.IGNORECASE,
     )
     if not address_type:
         raise ValueError(f"{source}: no Liberty address bus type")
@@ -206,18 +213,39 @@ def validate(manifest_path: Path) -> dict:
     gds_names_by_source = {}
     if physical_views:
         gds_dir = root / manifest["gds_dir"]
+        expected_by_source = {}
+        for entry in manifest["macros"]:
+            expected_by_source.setdefault(manifest["gds_sources"][entry["name"]], set()).add(entry["gds_cell"])
         for source in manifest["gds_sources"].values():
             source_path = gds_dir / source
             if not source_path.is_file():
                 raise ValueError(f"missing GDS source: {source_path}")
-            gds_names_by_source[source] = gds_names(source_path)
+            gds_names_by_source[source] = gds_names(source_path, expected_by_source.get(source))
+
+    timing_corners = {}
+    for corner, sources in manifest.get("timing_corners", {}).items():
+        if isinstance(sources, str):
+            sources = [sources]
+        if not isinstance(sources, list) or not sources:
+            raise ValueError(f"timing corner {corner!r} must contain one or more Liberty files")
+        resolved = []
+        for source in sources:
+            path = Path(source)
+            if not path.is_absolute():
+                path = root / manifest["lib_dir"] / path
+            if not path.is_file():
+                raise ValueError(f"timing corner {corner}: missing Liberty view {path}")
+            if not any(entry["name"] in parse_lib(path)["cells"] for entry in manifest["macros"]):
+                raise ValueError(f"timing corner {corner}: no manifest macro found in {path}")
+            resolved.append(str(path))
+        timing_corners[corner] = resolved
 
     checked = []
     for entry in manifest["macros"]:
         name = entry["name"]
-        lef = root / manifest["lef_dir"] / f"{name}.lef"
-        lib = root / manifest["lib_dir"] / f"{name}.lib"
-        verilog = root / manifest["verilog_dir"] / f"{name}.v"
+        lef = root / manifest["lef_dir"] / entry.get("lef_file", f"{name}.lef")
+        lib = root / manifest["lib_dir"] / entry.get("lib_file", f"{name}.lib")
+        verilog = root / manifest["verilog_dir"] / entry.get("verilog_file", f"{name}.v")
         for path in (lef, lib, verilog):
             if not path.is_file():
                 raise ValueError(f"{name}: missing view {path}")
@@ -229,22 +257,32 @@ def validate(manifest_path: Path) -> dict:
             raise ValueError(f"{name}: Verilog module is {verilog_info['module']}")
         if lef_info["macro"] != name:
             raise ValueError(f"{name}: LEF macro is {lef_info['macro']}")
-        expected_sites = set(manifest.get("lef_sites", [manifest.get("lef_site")]))
-        if lef_info["site"] not in expected_sites:
+        configured_sites = manifest.get("lef_sites")
+        if configured_sites is None and "lef_site" in manifest:
+            configured_sites = [manifest["lef_site"]]
+        expected_sites = set(configured_sites or [])
+        if expected_sites and lef_info["site"] not in expected_sites:
             raise ValueError(f"{name}: LEF site is {lef_info['site']}, expected one of {sorted(expected_sites)}")
         if name not in lib_info["cells"]:
             raise ValueError(f"{name}: Liberty cell is missing")
-        missing = REQUIRED_PORTS - set(verilog_info["ports"])
+        port_map = entry.get("port_map", {})
+        logical_ports = {
+            "data": port_map.get("data", "wd"),
+            "dataout": port_map.get("dataout", "dataout"),
+            "address": port_map.get("address", "ADDRESS"),
+        }
+        required_ports = set(manifest.get("required_ports", REQUIRED_PORTS))
+        missing = required_ports - set(verilog_info["ports"])
         if missing:
             raise ValueError(f"{name}: missing Verilog ports {sorted(missing)}")
-        missing = REQUIRED_PORTS - set(lef_info["pins"])
+        missing = required_ports - set(lef_info["pins"])
         if missing:
             raise ValueError(f"{name}: missing LEF pins {sorted(missing)}")
-        if verilog_info["ports"]["wd"]["width"] != entry["width"]:
-            raise ValueError(f"{name}: wd width does not match manifest")
-        if verilog_info["ports"]["dataout"]["width"] != entry["width"]:
+        if verilog_info["ports"][logical_ports["data"]]["width"] != entry["width"]:
+            raise ValueError(f"{name}: data width does not match manifest")
+        if verilog_info["ports"][logical_ports["dataout"]]["width"] != entry["width"]:
             raise ValueError(f"{name}: dataout width does not match manifest")
-        if verilog_info["ports"]["ADDRESS"]["width"] != entry["address_width"]:
+        if verilog_info["ports"][logical_ports["address"]]["width"] != entry["address_width"]:
             raise ValueError(f"{name}: address width does not match manifest")
         if verilog_info["inferred_depth"] is not None and verilog_info["inferred_depth"] != entry["depth"]:
             raise ValueError(f"{name}: inferred depth does not match manifest")
@@ -271,6 +309,7 @@ def validate(manifest_path: Path) -> dict:
         "library_name": manifest["library_name"],
         "physical_views": physical_views,
         "abstract_lef_site": manifest.get("abstract_lef_site"),
+        "timing_corners": timing_corners,
         "macros": checked,
     }
 

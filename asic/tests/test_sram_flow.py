@@ -64,6 +64,33 @@ class SramFlowTest(unittest.TestCase):
         self.assertIn("--with-btb", generated)
         self.assertIn("--btb-single-port-ram", generated)
 
+    def test_ics55_byte_mask_prefers_one_bit_write_macro(self):
+        port_map = {
+            "clk": "CLK", "address": "A", "data": "D",
+            "banksel": "CEB", "read": "GWEB", "write": "WEB",
+            "dataout": "Q", "margin": "MAR", "margin_enable": "MARE",
+        }
+        manifest = {
+            "macros": [
+                {
+                    "name": "ics55_256x8", "depth": 256, "width": 8,
+                    "address_width": 8, "port_map": port_map,
+                    "write_mask_granularity": "bit",
+                },
+                {
+                    "name": "ics55_256x32", "depth": 256, "width": 32,
+                    "address_width": 8, "port_map": port_map,
+                    "write_mask_granularity": "bit",
+                },
+            ],
+            "logical_lane_policy": {"physical_width_preference": [8, 32]},
+        }
+        text, metadata = generate_main(manifest, 32, 256)
+        self.assertEqual(metadata["macro"], "ics55_256x32")
+        self.assertEqual(metadata["packing"], "full_word")
+        self.assertIn("gen_packed_byte_ics55_256x32", text)
+        self.assertIn("~(byte_write_mask)", text)
+
     def test_memory_mask_classes_select_storage_width(self):
         self.assertEqual(classify_memory(32, 4, True), "byte_lane")
         self.assertEqual(storage_width_for_mask(32, 4, True), 8)
