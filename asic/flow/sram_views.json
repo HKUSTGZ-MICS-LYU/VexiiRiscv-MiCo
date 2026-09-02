@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "library_name": "mico_asap7_sram",
+  "root": "../../asic/pdk/asap7sram/asap7_sram_0p0",
+  "lef_dir": "generated/LEF",
+  "lib_dir": "generated/LIB",
+  "verilog_dir": "generated/verilog",
+  "gds_dir": "gds",
+  "gds_scale": "normal_lef",
+  "lef_site": "asap7sc7p5t",
+  "gds_sources": {
+    "srambank_64x4x64_6t122": "srambank_32b.gds",
+    "srambank_128x4x64_6t122": "srambank_64b.gds",
+    "srambank_256x4x64_6t122": "srambank_128b.gds"
+  },
+  "macros": [
+    {"name": "srambank_64x4x64_6t122", "depth": 256, "width": 64, "address_width": 8, "gds_cell": "srambank_32b", "wrapper": "sync_single_port", "register": true},
+    {"name": "srambank_128x4x64_6t122", "depth": 512, "width": 64, "address_width": 9, "gds_cell": "srambank_64b", "wrapper": "sync_single_port", "register": true},
+    {"name": "srambank_256x4x64_6t122", "depth": 1024, "width": 64, "address_width": 10, "gds_cell": "srambank_128b", "wrapper": "sync_single_port", "register": true}
+  ],
+  "logical_lane_policy": {
+    "requested_width": 8,
+    "physical_width_preference": [64],
+    "allow_wider_carrier": true,
+    "carrier_bits_used": "low_bits_only_within_each_selected_unit",
+    "mask_classification": {
+      "byte_lane": "one 8-bit carrier per byte-enable bit",
+      "whole_word": "one carrier for the full logical word",
+      "segment_mask": "one carrier per mask segment"
+    }
+  }
+}

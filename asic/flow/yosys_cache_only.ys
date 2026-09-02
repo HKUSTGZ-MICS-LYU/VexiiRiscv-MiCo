@@ -1,0 +1,19 @@
+# Standalone cache-only MiCoSoc synthesis. Run from a prepared work directory.
+# Inputs are generated RTL plus blackbox SRAM declarations; no SiliconCompiler is used.
+
+read_verilog -lib inputs/asap7_sram_cells.v
+read_verilog -sv -D SYNTHESIS inputs/spinal_ram_wrappers.v inputs/MiCoSoc.v
+hierarchy -check -top MiCoSoc
+flatten
+proc
+opt
+memory_dff
+opt
+write_json outputs/pre_memory.json
+memory_map
+opt
+techmap
+opt
+clean
+write_json outputs/post_synth.json
+tee -o reports/yosys_stat.json stat -json
