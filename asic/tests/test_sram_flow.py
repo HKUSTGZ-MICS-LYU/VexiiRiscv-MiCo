@@ -91,6 +91,34 @@ class SramFlowTest(unittest.TestCase):
         self.assertIn("gen_packed_byte_ics55_256x32", text)
         self.assertIn("~(byte_write_mask)", text)
 
+    def test_ics55_sync_wrapper_packs_byte_mask(self):
+        port_map = {
+            "clk": "CLK", "address": "A", "data": "D",
+            "banksel": "CEB", "read": "GWEB", "write": "WEB",
+            "dataout": "Q", "margin": "MAR", "margin_enable": "MARE",
+        }
+        manifest = {
+            "macros": [
+                {
+                    "name": "ics55_256x8", "depth": 256, "width": 8,
+                    "address_width": 8, "port_map": port_map,
+                    "write_mask_granularity": "bit",
+                },
+                {
+                    "name": "ics55_256x32", "depth": 256, "width": 32,
+                    "address_width": 8, "port_map": port_map,
+                    "write_mask_granularity": "bit",
+                },
+            ],
+            "logical_lane_policy": {"physical_width_preference": [8, 32]},
+        }
+        text, metadata = generate_rf(manifest, 8, 1)
+        self.assertEqual(metadata["macro"], "ics55_256x8")
+        self.assertIn("gen_packed_byte_ics55_256x32", text)
+        self.assertIn("wrDataWidth <= 32", text)
+        self.assertIn("byte_write_mask[packed_mask_idx * 8 +: 8]", text)
+        self.assertIn("~(byte_write_mask)", text)
+
     def test_memory_mask_classes_select_storage_width(self):
         self.assertEqual(classify_memory(32, 4, True), "byte_lane")
         self.assertEqual(storage_width_for_mask(32, 4, True), 8)
@@ -350,6 +378,16 @@ endmodule
             ], cwd=ROOT, check=True, capture_output=True, text=True)
             result = subprocess.run([str(mdir / "Vsram_1w_1rs_tb")], check=True, capture_output=True, text=True)
             self.assertIn("PASS: arbitrary cache width", result.stdout)
+
+    def test_no_main_omits_main_wrapper_definition(self):
+        generator = FLOW / "generate_sram_wrappers.py"
+        with tempfile.TemporaryDirectory(prefix="mico-sram-no-main-") as tmp:
+            wrapper = Path(tmp) / "wrappers.v"
+            subprocess.run([
+                sys.executable, str(generator), "--output", str(wrapper),
+                "--main-word-count", "16", "--no-main",
+            ], cwd=ROOT, check=True, capture_output=True, text=True)
+            self.assertNotIn("module Ram_1wrs", wrapper.read_text())
 
 
 if __name__ == "__main__":

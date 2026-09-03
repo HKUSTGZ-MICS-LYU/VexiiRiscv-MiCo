@@ -74,7 +74,8 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
       computePipe = p.BitNetCfuPipe,
       q8ComparePipe = p.BitNetCfuQ8ComparePipe,
       quantStandard = p.BitNetCfuQuantStandard,
-      burstLoad = p.BitNetCfuBurstLoad)
+      burstLoad = p.BitNetCfuBurstLoad,
+      asicSram = p.asicSram)
 
     val bitNetCfuV2Param = BitNetCfuV2Parameter(
       vlen = p.BitNetCfuLen,
@@ -93,7 +94,8 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
       rfRam = true,
       rfSync = p.BitNetCfuRfSync,
       burstLoad = p.BitNetCfuBurstLoad,
-      quantStandard = p.BitNetCfuQuantStandard)
+      quantStandard = p.BitNetCfuQuantStandard,
+      asicSram = p.asicSram)
 
     val cfu = p.useMiCoVpu generate new TilelinkVpuCfuFiber(vpuParam, p.vexii.xlen) {
       mainBus << bus
@@ -174,9 +176,22 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
       mBus.node at SizeMapping(sparseMemAt, sparseMemSize) of memBus
       mBus.node.addTag(PMA.MAIN)
     }
-    val ram = new tilelink.fabric.RamFiber(p.ramBytes)
     val ramAt = 0x80000000l
-    ram.up at ramAt of memBus
+    val ramPort = p.ramPort generate new SlaveBus(
+      M2sSupport(
+        transfers = M2sTransfers.allGetPut,
+        dataWidth = p.vexii.memDataWidth,
+        addressWidth = log2Up(p.ramBytes)
+      ),
+      S2mParameters(Nil)
+    )
+    val ram = (!p.ramPort) generate new tilelink.fabric.RamFiber(p.ramBytes)
+    if (p.ramPort) {
+      ramPort.node at ramAt of memBus
+      ramPort.node.addTag(PMA.MAIN)
+    } else {
+      ram.up at ramAt of memBus
+    }
 
     // Handle all the IO / Peripheral things
     val peripheral = new Area {
@@ -222,11 +237,13 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
     }
 
     val patcher = Fiber patch new Area {
-      p.ramElf.foreach(new Elf(_, p.vexii.xlen).init(ram.thread.logic.mem, 0x80000000l))
-      println(MemoryConnection.getMemoryTransfers(cpu.dBus).mkString("\n"))
-      if (p.ramBlackBox) {
-        ram.thread.logic.mem.generateAsBlackBox()
+      if (!p.ramPort) {
+        p.ramElf.foreach(new Elf(_, p.vexii.xlen).init(ram.thread.logic.mem, 0x80000000l))
+        if (p.ramBlackBox || p.asicSram) {
+          ram.thread.logic.mem.generateAsBlackBox()
+        }
       }
+      println(MemoryConnection.getMemoryTransfers(cpu.dBus).mkString("\n"))
     }
   }
 }

@@ -10,8 +10,10 @@ import java.io.File
 class MiCoSocParam {
   var ramBytes = 512 KiB
   var ramElf = Option.empty[File]
+  var ramPort = false
   var ramBlackBox = false
   var blackBoxASIC = false
+  var asicSram = false
   val vexii = new ParamMiCo()
   val socCtrl = new SocCtrlParam()
   var withSpiFlash = false
@@ -66,8 +68,11 @@ class MiCoSocParam {
     opt[Int]("ram-bytes") action { (v, c) => ramBytes = v }
     opt[Int]("ram-kbytes") action { (v, c) => ramBytes = v * 1024 }
     opt[String]("ram-elf") action { (v, c) => ramElf = Some(new File(v)) }
+    opt[Unit]("ram-port") action { (v, c) => ramPort = true }
+    opt[Unit]("external-main-ram") action { (v, c) => ramPort = true }
     opt[Unit]("ram-blackbox") action { (v, c) => ramBlackBox = true  }
     opt[Unit]("blackbox-all") action { (v, c) => blackBoxASIC = true }
+    opt[Unit]("asic-sram") action { (v, c) => asicSram = true }
     opt[Boolean]("spi-flash") action { (v, c) => withSpiFlash = v  }
     opt[Unit]("mico-vpu") action { (v, c) => useMiCoVpu = true; vexii.withCfu = true}
     opt[Int]("mico-vpu-len") action { (v, c) => MiCoVpuLen = v }
@@ -135,6 +140,15 @@ class MiCoSocParam {
     if(useBitNetCfu){
       require(!useMiCoVpu && !useBitNetCfuV2, "MiCo VPU, BitNet CFU and BitNet CFU V2 share the single CPU CFU bus; enable only one of them")
       vexii.lsuMemDataWidthMin = vexii.lsuMemDataWidthMin max BitNetCfuBusWidth
+    }
+    if(ramPort) {
+      require(ramElf.isEmpty, "--ram-port cannot be combined with --ram-elf")
+    }
+    if(asicSram) {
+      require(!blackBoxASIC, "ASIC SRAM mode uses selective memory blackboxing; do not combine it with --blackbox-all")
+      require(ramElf.isEmpty, "ASIC SRAM mode cannot blackbox an initialized RAM; omit --ram-elf")
+      require(!useBitNetCfu || BitNetCfuRfSync, "ASIC SRAM mode requires synchronous BitNetCfu RF reads")
+      require(!useBitNetCfuV2 || BitNetCfuRfSync, "ASIC SRAM mode requires synchronous BitNetCfu V2 RF reads")
     }
     if(useBitNetCfuV2){
       require(!useMiCoVpu && !useBitNetCfu, "MiCo VPU, BitNet CFU and BitNet CFU V2 share the single CPU CFU bus; enable only one of them")

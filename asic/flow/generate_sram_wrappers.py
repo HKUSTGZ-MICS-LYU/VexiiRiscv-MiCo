@@ -57,8 +57,8 @@ def _eligible_macros(manifest: dict, minimum_width: int) -> list[dict]:
 def _sram_options(manifest: dict, minimum_width: int = 8) -> list[dict]:
     eligible = _eligible_macros(manifest, minimum_width)
 
-    # Keep one carrier per depth. The preference list controls width; the
-    # wrapper then emits one such carrier for each logical byte lane.
+    # Keep one carrier per depth. The preference list controls width; wrappers
+    # use these carriers for packed full-word masks or byte-lane fallback.
     by_depth = {}
     for macro in eligible:
         current = by_depth.get(macro["depth"])
@@ -291,6 +291,8 @@ def generate_main(manifest: dict, word_width: int, word_count: int) -> tuple[str
         select_packed_macro(manifest, word_width, word_count)
         if byte_mask_width > 1 else None
     )
+    packed_widths = _macro_width_groups(manifest, word_width, bit_write_only=True)
+    packed_max_width = max((width for width, _ in packed_widths), default=0)
     selected_macro = packed_macro or select_macro(manifest, 8, word_count, logical_width=8)
     banks = math.ceil(word_count / selected_macro["depth"])
     body = [
@@ -324,7 +326,7 @@ def generate_main(manifest: dict, word_width: int, word_count: int) -> tuple[str
     ]
     if packed_macro is not None:
         body.extend([
-            "    if (BYTE_MASK_MODE) begin : gen_packed_byte_mask",
+            f"    if (BYTE_MASK_MODE && wordWidth <= {packed_max_width}) begin : gen_packed_byte_mask",
             "      wire [wordWidth - 1:0] byte_write_mask;",
             "      genvar packed_mask_idx;",
             "      for (packed_mask_idx = 0; packed_mask_idx < LANE_COUNT; packed_mask_idx = packed_mask_idx + 1) begin : gen_packed_mask",
@@ -453,6 +455,9 @@ def generate_rf(manifest: dict, word_width: int, word_count: int) -> tuple[str, 
     if word_width <= 0 or word_count <= 0:
         raise ValueError("word_width and word_count must be positive")
     options = _sram_options(manifest)
+    packed_widths = _macro_width_groups(manifest, 8, bit_write_only=True)
+    packed_enabled = bool(packed_widths)
+    packed_max_width = max((width for width, _ in packed_widths), default=0)
     selected_macro = select_macro(manifest, 8, word_count, logical_width=8)
     banks = math.ceil(word_count / selected_macro["depth"])
     body = [
@@ -492,7 +497,38 @@ def generate_rf(manifest: dict, word_width: int, word_count: int) -> tuple[str, 
         "  wire [wrDataWidth - 1:0] word_rdata;",
         "  wire [SEGMENT_WIDTH - 1:0] segment_rdata [0:wrMaskWidth - 1];",
         "  generate",
-        "    if (BYTE_MASK_MODE) begin : gen_byte_mask",
+    ]
+    if packed_enabled:
+        body.extend([
+            f"    if (BYTE_MASK_MODE && wrDataWidth <= {packed_max_width}) begin : gen_packed_byte_mask",
+            "      wire [wrDataWidth - 1:0] byte_write_mask;",
+            "      genvar packed_mask_idx;",
+            "      for (packed_mask_idx = 0; packed_mask_idx < LANE_COUNT; packed_mask_idx = packed_mask_idx + 1) begin : gen_packed_mask",
+            "        if ((packed_mask_idx + 1) * 8 <= wrDataWidth) begin : gen_full_mask_byte",
+            "          assign byte_write_mask[packed_mask_idx * 8 +: 8] = {8{wr_en && wr_mask[packed_mask_idx]}};",
+            "        end else begin : gen_partial_mask_byte",
+            "          assign byte_write_mask[packed_mask_idx * 8 +: (wrDataWidth - packed_mask_idx * 8)] = {(wrDataWidth - packed_mask_idx * 8){wr_en && wr_mask[packed_mask_idx]}};",
+            "        end",
+            "      end",
+        ])
+        _emit_macro_chain(
+            body,
+            manifest,
+            payload_width="wrDataWidth",
+            payload_data="wr_data",
+            payload_rdata="word_rdata",
+            write_enable="wr_en",
+            prefix="packed_byte",
+            rf=True,
+            write_mask="byte_write_mask",
+        )
+        body.extend([
+            "      assign rd_data = word_rdata[rdDataWidth - 1:0];",
+            "    end else if (BYTE_MASK_MODE) begin : gen_byte_mask",
+        ])
+    else:
+        body.append("    if (BYTE_MASK_MODE) begin : gen_byte_mask")
+    body.extend([
         "      genvar lane_idx;",
         "      for (lane_idx = 0; lane_idx < LANE_COUNT; lane_idx = lane_idx + 1) begin : gen_lane",
         "        wire [7:0] lane_wdata;",
@@ -504,7 +540,7 @@ def generate_rf(manifest: dict, word_width: int, word_count: int) -> tuple[str, 
         "        end else begin : gen_empty_write_lane",
         "          assign lane_wdata = 8'b0;",
         "        end",
-    ]
+    ])
     _emit_macro_chain(
         body,
         manifest,
@@ -630,6 +666,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--main-word-count", type=int, required=True)
     parser.add_argument("--main-word-width", type=int, default=32)
+    parser.add_argument(
+        "--no-main", action="store_true",
+        help="do not emit the main-RAM wrapper; keep only explicitly requested auxiliary wrappers",
+    )
     parser.add_argument("--rf-word-count", type=int)
     parser.add_argument("--rf-word-width", type=int)
     parser.add_argument("--blackbox-output", type=Path)
@@ -642,9 +682,12 @@ def main() -> int:
     if args.blackbox_output is not None:
         args.blackbox_output.parent.mkdir(parents=True, exist_ok=True)
         args.blackbox_output.write_text(generate_blackbox_declarations(manifest))
-    main_text, main_metadata = generate_main(manifest, args.main_word_width, args.main_word_count)
-    sections = ["// Generated by generate_sram_wrappers.py", "", main_text]
-    metadata = {"main": main_metadata, "rf": None}
+    sections = ["// Generated by generate_sram_wrappers.py"]
+    metadata = {"main": None, "rf": None}
+    if not args.no_main:
+        main_text, main_metadata = generate_main(manifest, args.main_word_width, args.main_word_count)
+        sections.extend(["", main_text])
+        metadata["main"] = main_metadata
     if args.rf_word_count is not None or args.rf_word_width is not None:
         if args.rf_word_count is None or args.rf_word_width is None:
             raise ValueError("--rf-word-count and --rf-word-width must be supplied together")

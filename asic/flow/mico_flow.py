@@ -32,7 +32,7 @@ from download_ics55_sram_pdk import MUX_RULES, PVT_CORNERS, RINGS, download_pack
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--preset", choices=("minimal", "minimal-bncfu", "base", "bncfu", "bncfu-v2"), default="base")
+    parser.add_argument("--preset", choices=("minimal", "minimal-bncfu", "base", "large", "bncfu", "bncfu-v2"), default="base")
     parser.add_argument("--step", choices=("syn", "asic"), default="syn")
     parser.add_argument("--pdk", choices=("asap7", "ics55"), default="asap7")
     parser.add_argument("--ics55-pdk-root", type=Path)
@@ -71,6 +71,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--scope", choices=("soc", "cpu-cfu"), default="soc")
     parser.add_argument("--ram-kbytes", type=int, default=None)
+    parser.add_argument(
+        "--ram-port", "--external-main-ram", dest="ram_port", action="store_true",
+        help="omit the internal main RAM and expose its TileLink slave port at 0x80000000",
+    )
     parser.add_argument("--bitnet-cfu-len", type=int, default=256)
     parser.add_argument("--bitnet-cfu-width", type=int, default=128)
     parser.add_argument("--bitnet-cfu-reg-depth", type=int, default=5)
@@ -91,6 +95,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--fast-placement", action="store_true",
         help="skip optional timing-repair nodes for bounded P&R smoke runs",
+    )
+    parser.add_argument(
+        "--macro-halo", type=float, default=1.0,
+        help="native OpenROAD macro placement halo in microns (default: 1.0)",
     )
     parser.add_argument(
         "--grt-overflow-iter", type=int, default=100,
@@ -444,6 +452,19 @@ def generator_args(args: argparse.Namespace, staging: Path) -> list[str]:
             "--ram-kbytes", str(args.ram_kbytes),
             "--netlist-directory", str(staging), "--netlist-name", "MiCoSoc",
         ]
+    elif args.preset in ("large"):
+        result = [
+            "--with-rvc", "--with-rvm", "--with-rvf",
+            "--decoders", "2", "--lanes", "2", 
+            "--with-aligner-buffer", "--with-dispatcher-buffer",
+            "--with-ras", "--with-btb", "--with-gshare",
+            "--lsu-l1", "--lsu-l1-ways", "2", 
+            "--fetch-l1", "--fetch-l1-ways", "2",
+            "--with-late-alu", "--allow-bypass-from", "0",
+            "--div-radix", "4",
+            "--ram-kbytes", str(args.ram_kbytes),
+            "--netlist-directory", str(staging), "--netlist-name", "MiCoSoc",
+        ]
     else:
         result = [
             "--with-rvc", "--with-rvm", "--with-late-alu", "--allow-bypass-from", "0",
@@ -451,9 +472,11 @@ def generator_args(args: argparse.Namespace, staging: Path) -> list[str]:
             "--ram-kbytes", str(args.ram_kbytes),
             "--netlist-directory", str(staging), "--netlist-name", "MiCoSoc",
         ]
+    if getattr(args, "ram_port", False):
+        result.append("--ram-port")
     if args.sram_backend in ("asap7", "ics55"):
         result.append("--asic-sram")
-    if args.preset not in ("minimal", "minimal-bncfu") and not args.no_btb:
+    if args.preset not in ("minimal", "minimal-bncfu", "large") and not args.no_btb:
         result.append("--with-btb")
         if args.sram_backend == "asap7":
             result.append("--btb-single-port-ram")
@@ -636,9 +659,19 @@ def configure_project(
                 active_macro_names,
             )
         project.add_asiclib(sram_library)
+        if args.step == "asic" and args.pdk == "asap7":
+            # The checked-in ASAP7 SRAM LEFs have a pin phase that fails inside
+            # rtl_macro_placer; retain the existing track-grid workaround.
+            placement_script = ROOT / "asic" / "constraints" / "macro_placement.tcl"
+            project.add("tool", "openroad", "task", "macro_placement", "var", "mpl_constraints", str(placement_script))
     if args.step == "asic":
+        if args.macro_halo < 0:
+            raise ValueError("macro_halo must be non-negative")
         # SC 0.38.5 requires this key even when no macros are present.
-        project.set("tool", "openroad", "task", "macro_placement", "var", "macro_place_halo", (1.0, 1.0))
+        project.set(
+            "tool", "openroad", "task", "macro_placement", "var",
+            "macro_place_halo", (args.macro_halo, args.macro_halo),
+        )
     return project
 
 
@@ -722,6 +755,8 @@ def collect_metrics(
             "policy": "cpu-cfu uses the real full-SoC context; P&R is not replaced by a bus stub",
         },
         "ram_kbytes": args.ram_kbytes,
+        "ram_port": args.ram_port,
+        "macro_halo": args.macro_halo,
         "wrapper": wrapper_metadata,
         "fallback_policy": "non-single-port RAMs remain soft and are synthesized as FF",
         "sc_metrics": {},
@@ -829,6 +864,8 @@ def main() -> int:
             "--main-word-count", str(main_word_count), "--main-word-width", "32",
         ]
         command += ["--rf-word-count", str(rf_count), "--rf-word-width", str(rf_width)]
+        if args.ram_port:
+            command.append("--no-main")
         if args.abstract_only or args.sram_backend == "ics55":
             command += ["--blackbox-output", str(blackbox_cells)]
         subprocess.run(command, cwd=ROOT, check=True)
@@ -864,7 +901,7 @@ def main() -> int:
         project.option.add_from(args.from_step, clobber=True)
     if args.to_step:
         project.option.add_to(args.to_step, clobber=True)
-    if args.abstract_only and args.step == "asic":
+    if args.abstract_only and args.step == "asic" and args.to_step is None:
         # Abstract SRAM views have no GDS; stop at route reports by default.
         stop_step = "route.detailed" if args.abstract_detailed_route else "route.global"
         project.option.add_to(stop_step, clobber=True)

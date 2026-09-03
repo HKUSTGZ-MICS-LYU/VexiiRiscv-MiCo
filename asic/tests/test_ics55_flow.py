@@ -59,6 +59,14 @@ class Ics55FlowTest(unittest.TestCase):
         finally:
             sys.argv = old_argv
 
+    def test_macro_halo_is_configurable(self):
+        old_argv = sys.argv
+        try:
+            sys.argv = ["mico_flow.py", "--pdk", "ics55", "--macro-halo", "5.0"]
+            self.assertEqual(parse_args().macro_halo, 5.0)
+        finally:
+            sys.argv = old_argv
+
     def test_automatic_sram_requests_follow_generated_memory_shapes(self):
         rtl = """
 module MiCoSoc;
@@ -113,6 +121,22 @@ endmodule
             preset="minimal", ram_kbytes=1, sram_backend="ics55", no_btb=False,
         )
         self.assertIn("--asic-sram", generator_args(args, Path("staging")))
+
+    def test_ram_port_is_parsed_and_forwarded(self):
+        old_argv = sys.argv
+        try:
+            sys.argv = ["mico_flow.py", "--ram-port"]
+            self.assertTrue(parse_args().ram_port)
+            sys.argv = ["mico_flow.py", "--external-main-ram"]
+            self.assertTrue(parse_args().ram_port)
+        finally:
+            sys.argv = old_argv
+
+        args = types.SimpleNamespace(
+            preset="minimal", ram_kbytes=1, sram_backend="soft", no_btb=False,
+            ram_port=True,
+        )
+        self.assertIn("--ram-port", generator_args(args, Path("staging")))
 
     def test_ics55_default_collateral_is_discoverable(self):
         assets = discover_assets(ROOT / "asic" / "pdk" / "icsprout55-pdk")

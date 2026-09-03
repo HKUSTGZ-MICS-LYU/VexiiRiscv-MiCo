@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from ics55_assets import (
@@ -18,12 +19,22 @@ FLOW_DIR = Path(__file__).resolve().parent
 
 
 def _openroad_tech_lef(assets: Ics55Assets) -> Path:
-    """Drop the dangling POLY via-rule reference rejected by current OpenROAD."""
+    """Create an OpenROAD-compatible tech LEF without unused tap NDRs."""
     cache = Path("/tmp") / "mico-ics55-tech"
     cache.mkdir(parents=True, exist_ok=True)
     output = cache / "N551P6M.lef"
     text = assets.tech_lef.read_text(encoding="utf-8", errors="replace")
-    output.write_text(text.replace("USEVIARULE MET1_POLY ;", ""))
+    text = text.replace("USEVIARULE MET1_POLY ;", "")
+    # The preview LEF's DefaultTaper NDR triggers an OpenROAD detailed-router
+    # assertion while parsing its POLY/viarule combination. It is unused by
+    # this MET2-MET5 standard-cell flow, so omit it from the private copy.
+    text = re.sub(
+        r"\nNONDEFAULTRULE\s+DefaultTaper\b.*?\nEND\s+DefaultTaper\s*\n",
+        "\n",
+        text,
+        flags=re.DOTALL,
+    )
+    output.write_text(text)
     return output
 
 

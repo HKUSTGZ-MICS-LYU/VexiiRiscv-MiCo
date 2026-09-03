@@ -3,6 +3,7 @@ package vexiiriscv.soc.mico
 import spinal.core._
 import spinal.lib.system.tag.MemoryConnection
 import vexiiriscv.VexiiRiscv
+import vexiiriscv.asic.Asap7SramBlackboxPolicy
 import vexiiriscv.execute.lsu.{LsuCachelessPlugin, LsuCachelessTileLinkPlugin, LsuL1Plugin, LsuL1TileLinkPlugin, LsuPlugin, LsuTileLinkPlugin}
 import vexiiriscv.fetch.{FetchCachelessPlugin, FetchCachelessTileLinkPlugin, FetchL1Plugin, FetchL1TileLinkPlugin}
 import vexiiriscv.soc.TilelinkVexiiRiscvFiber
@@ -49,19 +50,25 @@ object Bsp {
 
 object MiCoSocGen extends App{
   val p = new MiCoSocParam()
+  var netlistDirectory = "."
+  var netlistName = "MiCoSoc"
 
   assert(new scopt.OptionParser[Unit]("MiCoSoc") {
     p.addOptions(this)
+    opt[String]("netlist-directory") action { (v, c) => netlistDirectory = v }
+    opt[String]("netlist-name") action { (v, c) => netlistName = v }
   }.parse(args, ()).nonEmpty)
   p.legalize()
 
-  val policy = if(p.blackBoxASIC) blackboxAllWhatsYouCan else blackboxOnlyIfRequested 
+  val policy = if (p.asicSram) Asap7SramBlackboxPolicy
+               else if (p.blackBoxASIC) blackboxAllWhatsYouCan
+               else blackboxOnlyIfRequested
     
-  val report = SpinalConfig()
+  val report = SpinalConfig(targetDirectory = netlistDirectory)
               .addStandardMemBlackboxing(policy)
-              .generateVerilog(new MiCoSoc(p))
+              .generateVerilog(new MiCoSoc(p).setDefinitionName(netlistName))
 
-  Bsp(new File("."), report.toplevel.system.cpu)
+  Bsp(new File(netlistDirectory), report.toplevel.system.cpu)
 }
 
 
