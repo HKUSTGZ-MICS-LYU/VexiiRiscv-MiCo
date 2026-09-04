@@ -85,7 +85,7 @@ object MiCoSocSim extends App{
     if(p.sparseMem){
       val factor = 1.0f - p.sparseMemDelay
       val ma = new MemoryAgent(
-        dut.system.mBus.node.bus, 
+        dut.system.sparseMemPort.node.bus,
         dut.socCtrl.system.cd , 
         seed = 0, 
         randomProberFactor = if(factor < 1.0f) 0.2f else 0.0f, 

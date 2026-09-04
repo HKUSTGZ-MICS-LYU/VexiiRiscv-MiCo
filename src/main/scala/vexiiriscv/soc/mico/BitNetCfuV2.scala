@@ -35,7 +35,8 @@ case class BitNetCfuV2Parameter(
     var rfRam: Boolean = true,
     var rfSync: Boolean = true,
     var burstLoad: Boolean = false,
-    var quantStandard: Boolean = false
+    var quantStandard: Boolean = false,
+    var asicSram: Boolean = false
 ) {
   def quantWidthEffective = if (quantWidth == 0) vlen min 128 else quantWidth
   def pendingSize = vlen / xlen
@@ -208,6 +209,7 @@ private class BitNetCfuV2RegisterFilePlugin(ctx: BitNetCfuV2Context) extends Fib
 
     val regs = Vec(Reg(Bits(ctx.p.vlen bits)) init (0), ctx.p.regDepth)
     val banks = if (ctx.p.rfRam) Some(Seq.fill(nLoad)(Mem(Bits(ctx.p.xlen bits), wordCount = ctx.p.regDepth))) else None
+    if (ctx.p.asicSram) banks.foreach(_.foreach(_.generateAsBlackBox()))
 
     banks match {
       case Some(memories) =>
@@ -761,6 +763,7 @@ class BitNetCfuV2(
   require(p.dotPipeStages >= 0, "BitNetCfuV2 dotPipeStages must be non-negative")
   require(p.quantPipeStages >= 0, "BitNetCfuV2 quantPipeStages must be non-negative")
   require(!p.rfSync || p.rfRam, "BitNetCfuV2 synchronous RF requires RAM-backed registers")
+  require(!p.asicSram || (p.rfRam && p.rfSync), "BitNetCfuV2 ASIC SRAM mode requires a synchronous RAM-backed vector RF")
   if (p.withQ2T || p.withQ8) {
     require(BitNetCfuV2Checks.isPow2(p.quantWidthEffective), "BitNetCfuV2 quantWidth must be a power of two")
     require(p.vlen % p.quantWidthEffective == 0, "BitNetCfuV2 vlen must be a multiple of quantWidth")

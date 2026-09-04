@@ -156,16 +156,18 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
       mbus.setDownConnection(a = StreamPipe.FULL)
     }
     
-    var mBus : SlaveBus = null
-    if(p.sparseMem){
-      val sparseMemAt = 0x82000000l
-      val sparseMemSize = 0x10000000l // 256MB by default
+    // --sparse-mem exposes the off-chip sparse-memory window as a TileLink port.
+    // The CPU still addresses it at 0x82000000; the simulation MemoryAgent drives
+    // this same port instead of reaching into the internal bus hierarchy.
+    val sparseMemAt = 0x82000000l
+    val sparseMemSize = 0x10000000l // 256MB by default
+    val sparseMemPort = p.sparseMem generate {
       // Compute the actual CPU-side data width to match the sparse memory bus,
       // avoiding unnecessary TileLink width adapters that can trigger
       // "Stream valid persistence failed" assertions.
       val lsuMemDataWidth = if (p.vexii.lsuL1Enable) p.vexii.lsuMemDataWidth else p.vexii.xlen
       val cpuDataWidth = p.vexii.fetchMemDataWidth max lsuMemDataWidth
-      mBus = new SlaveBus(
+      new SlaveBus(
         M2sSupport(
           transfers = M2sTransfers.all,
           dataWidth = cpuDataWidth,
@@ -173,8 +175,10 @@ class MiCoSoc(p : MiCoSocParam) extends Component {
         ),
         S2mParameters(Nil)
       )
-      mBus.node at SizeMapping(sparseMemAt, sparseMemSize) of memBus
-      mBus.node.addTag(PMA.MAIN)
+    }
+    if (p.sparseMem) {
+      sparseMemPort.node at SizeMapping(sparseMemAt, sparseMemSize) of memBus
+      sparseMemPort.node.addTag(PMA.MAIN)
     }
     val ramAt = 0x80000000l
     val ramPort = p.ramPort generate new SlaveBus(

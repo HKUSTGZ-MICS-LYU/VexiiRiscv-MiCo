@@ -78,6 +78,7 @@ case class BitNetCfuParameter(
   var q8ComparePipe : Boolean = false,
   var quantStandard : Boolean = false,
   var burstLoad : Boolean = false,
+  var asicSram : Boolean = false
 ) {
   def quantWidthEffective = if(quantWidth == 0) vlen min 128 else quantWidth
   def pendingSize = vlen / xlen
@@ -127,6 +128,7 @@ class BitNetCfu(cfuParam: CfuBusParameter,
   assert(regDepth >= 2, "BitNetCfu must have at least two vector registers")
   assert(p.withQ2 || p.qType != "2b", "BitNetCfu qType=2b requires --bitnet-cfu-with-q2")
   assert(!p.rfSync || p.rfRam, "BitNetCfu sync vector RF requires RAM-backed vector registers")
+  assert(!p.asicSram || (p.rfRam && p.rfSync), "BitNetCfu ASIC SRAM mode requires a synchronous RAM-backed vector RF")
   assert(!p.rfSync || !p.noWaitCompute, "BitNetCfu sync vector RF does not support noWaitCompute")
   if(p.withQ2T || p.withQ8) {
     assert(RiscvBits.isPow2(quantWidth), "BitNetCfu quantWidth must be a power of two")
@@ -166,6 +168,7 @@ class BitNetCfu(cfuParam: CfuBusParameter,
   val vecRegsReg = Vec(Reg(Bits(vlen bits)) init(0), regDepth)
   val vecRegsBank = p.rfRam generate new Area {
     val banks = Seq.fill(nLoad)(Mem(Bits(xlen bits), wordCount = regDepth))
+    if (p.asicSram) banks.foreach(_.generateAsBlackBox())
     val wdata = Bits(xlen bits)
     val wen = Vec.fill(nLoad)(Bool())
     val waddr = UInt(regSelWidth bits)
